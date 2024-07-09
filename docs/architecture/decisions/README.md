@@ -19,4 +19,4 @@ NNNN-short-decision-name.md
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-model-registry-architecture.md) | Model Registry — control plane for versioned pricing rule artifacts | ⏳ Proposed |
+| [0001](0001-model-registry-architecture.md) | Model Registry — control plane for versioned pricing rule artifacts | ✅ Accepted |

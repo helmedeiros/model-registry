@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — the two-layer architecture (Versioned Config Store substrate + Model Registry service), the bre-go canonical format strategy (CSV authoritative; indexed JSON snapshot derived; Content-Type dispatch; no parser on the Registry's deploy path), and body-based reload as the markup-svc integration contract are the locked-in architectural decisions for this project. The package layout below — `internal/store`, `internal/registry/{state, gates, audit}`, `internal/deploy/markupsvc`, `internal/discovery/static`, `internal/httpapi`, `internal/observability` — governs subsequent ADRs. The cross-cutting observability + performance commitments are non-negotiable: every release ships with traces, structured logs, Prometheus metrics, AlertManager rules with runbooks, and pre-registered scientific harness bars.
 
 ## Context
 
