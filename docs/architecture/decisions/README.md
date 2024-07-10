@@ -20,3 +20,4 @@ NNNN-short-decision-name.md
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-model-registry-architecture.md) | Model Registry — control plane for versioned pricing rule artifacts | ✅ Accepted |
+| [0002](0002-versioned-config-store-substrate.md) | Versioned Config Store — typed Go substrate | ✅ Accepted |
