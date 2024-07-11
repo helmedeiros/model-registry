@@ -20,7 +20,9 @@ type Reader interface {
 	// branch on MemberKind, not on ContentType, to interpret the bytes.
 	GetMember(ctx context.Context, h Hash, m MemberKind) ([]byte, ContentType, error)
 
-	// List paginates artifact summaries in created_at descending order.
+	// List paginates artifact summaries in created_at descending order,
+	// with hash ascending as the tiebreaker. An unknown cursor restarts
+	// from the beginning (backings do not validate cursors).
 	List(ctx context.Context, opts ListOptions) (Page, error)
 
 	// ResolveTag returns the current hash for a tag. Returns ErrTagUnknown
