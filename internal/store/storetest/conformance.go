@@ -59,7 +59,6 @@ func RunConformance(t *testing.T, factory Factory) {
 		{"ListTieBreaksByHashWhenCreatedAtEqual", testListTieBreaksAscending},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			mk := func(t *testing.T) store.Store {
 				clk := newFakeClock(time.Unix(0, 0))
