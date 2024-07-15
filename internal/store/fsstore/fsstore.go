@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -26,14 +27,24 @@ const (
 // concurrent use within the process per the ADR-0002 single-writer
 // contract.
 type Store struct {
-	root string
-	db   *sql.DB
+	root  string
+	db    *sql.DB
+	clock func() time.Time
+}
+
+// Option configures a Store at construction.
+type Option func(*Store)
+
+// WithClock injects a clock for deterministic created_at timestamps in
+// tests. Default is time.Now.
+func WithClock(c func() time.Time) Option {
+	return func(s *Store) { s.clock = c }
 }
 
 // New opens (or creates) a Store rooted at the given directory. Idempotent:
 // a second call against an existing root reuses the schema and the object
 // tree. Returns the open Store; the caller closes it.
-func New(root string) (*Store, error) {
+func New(root string, opts ...Option) (*Store, error) {
 	if root == "" {
 		return nil, fmt.Errorf("fsstore: root is required")
 	}
@@ -59,7 +70,11 @@ func New(root string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{root: root, db: db}, nil
+	s := &Store{root: root, db: db, clock: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }
 
 // Close releases the SQLite handle. The on-disk object tree and
