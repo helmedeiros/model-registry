@@ -51,11 +51,6 @@ func (s *Store) GetBundle(ctx context.Context, h store.Hash) (store.Bundle, erro
 
 // GetMember implements store.Reader.
 func (s *Store) GetMember(ctx context.Context, h store.Hash, m store.MemberKind) ([]byte, store.ContentType, error) {
-	// Three columns are fetched in one SELECT rather than branching the
-	// query per member kind; sqlite returns the row with negligible
-	// marginal cost per column. For MemberSource the has_snapshot /
-	// has_diagnose values are unused — source presence is implied by a
-	// row existing at all.
 	var (
 		contentType              string
 		hasSnapshot, hasDiagnose int

@@ -17,11 +17,8 @@ func (s *Store) Put(ctx context.Context, req store.PutRequest) (store.Hash, erro
 	}
 	h := hashOf(req.SourceBytes)
 
-	// Cheap idempotency probe (~0.3–0.5 ms warm WAL). The authoritative
-	// race resolution happens in the INSERT OR IGNORE below; this
-	// short-circuits the common "operator re-uploads the same artifact"
-	// path before any file IO. New-hash Puts pay the probe RTT
-	// unconditionally — negligible against the < 15 ms small-Put bar.
+	// Probe short-circuits re-Puts before any file IO; the INSERT OR
+	// IGNORE below is the authoritative race resolver.
 	var found string
 	switch err := s.db.QueryRowContext(ctx, `SELECT hash FROM artifacts WHERE hash = ?`, string(h)).Scan(&found); {
 	case err == nil:
@@ -63,12 +60,8 @@ func (s *Store) Put(ctx context.Context, req store.PutRequest) (store.Hash, erro
 		return "", err
 	}
 
-	// INSERT OR IGNORE resolves the probe-vs-INSERT race for concurrent
-	// Puts of the same source bytes. Both writers produce identical
-	// source / snapshot / diagnose bytes (content-addressed); the
-	// loser's INSERT is silently dropped and the loser's metadata is
-	// not visible. Any future side effect added between the probe and
-	// this INSERT must remain safe under that race.
+	// Race loser's INSERT silently dropped; their identical
+	// content-addressed bytes are already on disk.
 	_, err = s.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO artifacts
 			(hash, content_type, state, created_at, created_by,

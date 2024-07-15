@@ -34,17 +34,10 @@ func (s *Store) memberPath(h store.Hash, member string) string {
 	return filepath.Join(s.artifactDir(h), member)
 }
 
-// writeAtomic writes data to a fresh temp file in the destination's
-// directory, fsyncs it, and renames over the destination. Either the
-// destination contains the new bytes or it is unchanged — no partial
-// state on crash. Caller must ensure the parent directory exists.
-//
-// Known gap: the parent directory is not fsynced after the rename. POSIX
-// strictly requires that to durably persist the new dentry across a
-// crash. v1's single-process single-writer posture treats this as an
-// acceptable risk against the per-write fsync cost (~3 ms on SSD); a
-// crash between rename and dir-block flush would orphan the temp bytes
-// while leaving the destination absent — recoverable by re-uploading.
+// writeAtomic writes data via tempfile + fsync + rename. Parent dir is
+// not fsynced — POSIX-strict durability is traded for the per-write
+// fsync cost; a crash between rename and dir-block flush is recoverable
+// by re-upload.
 func writeAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp.")
