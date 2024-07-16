@@ -2,6 +2,7 @@ package fsstore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/helmedeiros/model-registry/internal/store"
@@ -49,8 +50,14 @@ func (s *Store) Tag(ctx context.Context, tag string, h store.Hash) error {
 }
 
 func (s *Store) ResolveTag(ctx context.Context, tag string) (store.Hash, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return "", fmt.Errorf("fsstore: begin resolve tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var h string
-	err := s.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT hash FROM tags WHERE tag = ? ORDER BY assigned_at DESC LIMIT 1`,
 		tag).Scan(&h)
 	if isNoRows(err) {
