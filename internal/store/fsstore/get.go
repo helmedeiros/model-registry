@@ -86,7 +86,7 @@ func (s *Store) GetMember(ctx context.Context, h store.Hash, m store.MemberKind)
 		path = s.memberPath(h, memberDiagnose)
 		returnCT = store.ContentTypeUnknown
 	default:
-		return nil, "", store.ErrMemberAbsent
+		return nil, "", store.ErrInvalidKind
 	}
 
 	data, err := os.ReadFile(path)

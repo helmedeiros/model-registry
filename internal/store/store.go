@@ -14,10 +14,11 @@ type Reader interface {
 
 	// GetMember returns the bytes of a single bundle member. Returns
 	// ErrNotFound when the hash is unknown, ErrMemberAbsent when the
-	// hash exists but the requested member was never uploaded. The
-	// returned ContentType is the artifact's declared type for
-	// MemberSource and ContentTypeUnknown for derived members; callers
-	// branch on MemberKind, not on ContentType, to interpret the bytes.
+	// hash exists but the requested member was never uploaded, and
+	// ErrInvalidKind when MemberKind is not one of this package's
+	// constants. The returned ContentType is the artifact's declared
+	// type for MemberSource and ContentTypeUnknown for derived members;
+	// callers branch on MemberKind, not ContentType, to interpret bytes.
 	GetMember(ctx context.Context, h Hash, m MemberKind) ([]byte, ContentType, error)
 
 	// List paginates artifact summaries in created_at descending order,

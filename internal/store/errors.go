@@ -13,6 +13,12 @@ var (
 	// bundle member was never uploaded.
 	ErrMemberAbsent = errors.New("store: bundle member absent")
 
+	// ErrInvalidKind is returned when GetMember is called with a
+	// MemberKind the substrate does not recognise. Distinct from
+	// ErrMemberAbsent so callers can tell a programming mistake from a
+	// missing optional member.
+	ErrInvalidKind = errors.New("store: unknown member kind")
+
 	// ErrInvalidTransition is returned when a state transition is not
 	// permitted by the lifecycle (e.g. tagging or activating a deprecated
 	// artifact, or re-deprecating an already deprecated one).

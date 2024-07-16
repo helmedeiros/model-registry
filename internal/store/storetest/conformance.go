@@ -239,8 +239,8 @@ func testGetMemberNotFound(t *testing.T, mk func(*testing.T) store.Store) {
 func testGetMemberRejectsUnknownKind(t *testing.T, mk func(*testing.T) store.Store) {
 	s := mk(t)
 	h, _ := s.Put(ctx(), store.PutRequest{SourceBytes: []byte("x"), ContentType: store.ContentTypeCSV})
-	if _, _, err := s.GetMember(ctx(), h, store.MemberKind("rogue")); !errors.Is(err, store.ErrMemberAbsent) {
-		t.Fatalf("expected ErrMemberAbsent for rogue member kind, got %v", err)
+	if _, _, err := s.GetMember(ctx(), h, store.MemberKind("rogue")); !errors.Is(err, store.ErrInvalidKind) {
+		t.Fatalf("expected ErrInvalidKind for rogue member kind, got %v", err)
 	}
 }
 

@@ -143,7 +143,7 @@ func (s *Store) GetMember(_ context.Context, h store.Hash, m store.MemberKind) (
 		}
 		return cloneBytes(a.diagnose), store.ContentTypeUnknown, nil
 	default:
-		return nil, "", store.ErrMemberAbsent
+		return nil, "", store.ErrInvalidKind
 	}
 }
 

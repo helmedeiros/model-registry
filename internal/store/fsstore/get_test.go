@@ -103,7 +103,7 @@ func TestGetMemberRejectsUnknownKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.GetMember(context.Background(), h, store.MemberKind("rogue")); !errors.Is(err, store.ErrMemberAbsent) {
-		t.Fatalf("expected ErrMemberAbsent for rogue kind, got %v", err)
+	if _, _, err := s.GetMember(context.Background(), h, store.MemberKind("rogue")); !errors.Is(err, store.ErrInvalidKind) {
+		t.Fatalf("expected ErrInvalidKind for rogue kind, got %v", err)
 	}
 }
