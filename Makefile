@@ -5,7 +5,7 @@ PKG       := ./...
 COVER_OUT ?= coverage.out
 COVER_MIN ?= 80
 
-.PHONY: help lint vet test cover check-adrs all ci-local clean
+.PHONY: help lint vet test cover check-adrs all ci-local clean e2e
 
 help:
 	@echo "Targets:"
@@ -77,3 +77,9 @@ ci-local: all
 
 clean:
 	rm -f $(COVER_OUT)
+
+# End-to-end test against a live markup-svc. Default URL = http://localhost:8080.
+# Override with MARKUP_SVC_URL. Test is build-tagged `e2e` so default `make
+# test` does not require a running data plane.
+e2e:
+	$(GO) test -tags=e2e -v ./scientific/...
