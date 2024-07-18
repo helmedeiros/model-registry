@@ -83,3 +83,10 @@ clean:
 # test` does not require a running data plane.
 e2e:
 	$(GO) test -tags=e2e -v ./scientific/...
+
+# Substrate micro-benches against the fsstore backing. Build-tagged
+# `bench` so they do not run on default `make test`. Output is captured
+# raw; the operator transcribes results into scientific/v0.0.X/REPORT.md.
+.PHONY: bench-substrate
+bench-substrate:
+	$(GO) test -tags=bench -run=^$$ -bench=. -benchmem -benchtime=1s ./scientific/...
