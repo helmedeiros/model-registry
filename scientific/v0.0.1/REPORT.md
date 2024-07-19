@@ -2,7 +2,7 @@
 
 Pre-registered evaluation bars per the markup-svc/ADR-0012 protocol. Bars are committed in this file BEFORE measurement; bars do not move post-commit. Measured numbers are filled in only after the run.
 
-Status: bars pre-registered, micro-benches run on Apple M4 / NVMe SSD with `_journal_mode=WAL`, `_synchronous=FULL`, `_busy_timeout=5000`. `BenchmarkStoreList_*` lands with fsstore chunk (e); `BenchmarkStoreDeprecate` shipped with chunk (d) and the measured number will be locked in the v0.0.1 re-run. E2E round-trip green.
+Status: bars pre-registered, micro-benches run on Apple M4 / NVMe SSD with `_journal_mode=WAL`, `_synchronous=FULL`, `_busy_timeout=5000`. The full substrate surface (Put / Get / Tag / Resolve / List / Deprecate) is now implemented; measured numbers will be locked across the substrate in the v0.0.1 re-run. E2E round-trip green.
 
 ## Pre-registered bars
 
@@ -18,12 +18,12 @@ Run against `internal/store/fsstore` directly (not through the registry layer). 
 | `BenchmarkStoreGetBundle` (metadata only) | < 5 ms | pre-registered |
 | `BenchmarkStoreGetMember_SmallSourceWarm` (≤ 100 KB warm) | < 5 ms | pre-registered |
 | `BenchmarkStoreGetMember_LargeSource` (~2 MB warm cache) | < 50 ms | pre-registered |
-| `BenchmarkStoreList_1000Artifacts_StateFiltered` | < 50 ms | pre-registered (lands with chunk e) |
-| `BenchmarkStoreList_1000Artifacts_AllStates` | < 50 ms | pre-registered (lands with chunk e) |
+| `BenchmarkStoreList_1000Artifacts_StateFiltered` | < 50 ms | pre-registered |
+| `BenchmarkStoreList_1000Artifacts_AllStates` | < 50 ms | pre-registered |
 | `BenchmarkStoreTag` | < 10 ms | pre-registered |
 | `BenchmarkStoreResolveTag` | < 5 ms | pre-registered |
 | `BenchmarkStoreListTags_1000Tags` (window-function head extraction) | < 10 ms | pre-registered |
-| `BenchmarkStoreDeprecate` | < 10 ms | pre-registered (lands with chunk d) |
+| `BenchmarkStoreDeprecate` | < 10 ms | pre-registered |
 
 ### End-to-end capability bar (Iteration 1 + 2 composition)
 
@@ -69,7 +69,6 @@ Allocation profile: GetBundle 1.5 KB / 52 allocs; GetMember small 12.5 KB / 31 a
 
 ## Open items before tagging v0.0.1
 
-- Implement `List` (chunk e) → unlocks `BenchmarkStoreList_*`.
 - Wire `fsstore_test.TestConformance` (chunk f) → contract suite proves fsstore satisfies the typed Store.
 - Re-run all benches on the same hardware to lock the v0.0.1 measurement set.
 

@@ -66,3 +66,14 @@ type Store interface {
 	Reader
 	Writer
 }
+
+// List pagination policy. Shared by every backing so the contract's
+// "callers branch on NextCursor" guarantee holds regardless of which
+// backing is plugged in.
+const (
+	// DefaultListLimit applies when ListOptions.Limit is zero or negative.
+	DefaultListLimit = 100
+	// MaxListLimit caps any caller-supplied Limit silently to keep pages
+	// bounded across backings.
+	MaxListLimit = 1000
+)

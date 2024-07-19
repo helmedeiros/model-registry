@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	defaultListLimit = 100
-	maxListLimit     = 1000
+	defaultListLimit = store.DefaultListLimit
+	maxListLimit     = store.MaxListLimit
 )
 
 // Store is an in-memory implementation of store.Store.

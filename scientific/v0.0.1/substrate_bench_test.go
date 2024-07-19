@@ -225,6 +225,65 @@ func BenchmarkStoreDeprecate(b *testing.B) {
 	}
 }
 
+func BenchmarkStoreList_1000Artifacts_AllStates(b *testing.B) {
+	ctx := context.Background()
+	s := newBenchStore(b)
+	seedListFixture(b, s, 1000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		page, err := s.List(ctx, store.ListOptions{Limit: 1000})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(page.Items) != 1000 {
+			b.Fatalf("expected 1000 items, got %d", len(page.Items))
+		}
+	}
+}
+
+func BenchmarkStoreList_1000Artifacts_StateFiltered(b *testing.B) {
+	ctx := context.Background()
+	s := newBenchStore(b)
+	// Tag every other artifact in the returned list (newest-first) so
+	// exactly 500 are active and 500 remain staged — the state filter
+	// then has actual selectivity to exercise.
+	seedListFixture(b, s, 1000)
+	rows, err := s.List(ctx, store.ListOptions{Limit: 1000})
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < len(rows.Items); i += 2 {
+		if err := s.Tag(ctx, fmt.Sprintf("active-%04d", i), rows.Items[i].Hash); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		page, err := s.List(ctx, store.ListOptions{Limit: 1000, State: store.StateActive})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(page.Items) != 500 {
+			b.Fatalf("expected 500 active items, got %d", len(page.Items))
+		}
+	}
+}
+
+func seedListFixture(b *testing.B, s *fsstore.Store, n int) {
+	b.Helper()
+	ctx := context.Background()
+	for i := 0; i < n; i++ {
+		_, err := s.Put(ctx, store.PutRequest{
+			SourceBytes: mkBytes(256, int64(i)),
+			ContentType: store.ContentTypeCSV,
+			Metadata:    store.Metadata{CreatedBy: "bench", CreatedAt: time.Unix(int64(i), 0)},
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkStoreListTags_1000Tags(b *testing.B) {
 	ctx := context.Background()
 	s := newBenchStore(b)
