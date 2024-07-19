@@ -5,9 +5,23 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/helmedeiros/model-registry/internal/store"
 	"github.com/helmedeiros/model-registry/internal/store/fsstore"
+	"github.com/helmedeiros/model-registry/internal/store/storetest"
 )
+
+func TestConformance(t *testing.T) {
+	storetest.RunConformance(t, func(t *testing.T, clock func() time.Time) store.Store {
+		s, err := fsstore.New(t.TempDir(), fsstore.WithClock(clock))
+		if err != nil {
+			t.Fatalf("fsstore.New: %v", err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	})
+}
 
 func TestNewRequiresNonEmptyRoot(t *testing.T) {
 	if _, err := fsstore.New(""); err == nil {

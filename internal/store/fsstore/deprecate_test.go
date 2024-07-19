@@ -3,58 +3,18 @@ package fsstore_test
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/helmedeiros/model-registry/internal/store"
 	"github.com/helmedeiros/model-registry/internal/store/fsstore"
 )
 
-func TestDeprecateFromStagedIsTerminal(t *testing.T) {
-	s := newFsstore(t)
-	h := putRule(t, s, "alpha")
-
-	if err := s.Deprecate(context.Background(), h, "withdrawn"); err != nil {
-		t.Fatalf("Deprecate: %v", err)
-	}
-	bun, err := s.GetBundle(context.Background(), h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bun.State != store.StateDeprecated {
-		t.Fatalf("state=%s want deprecated", bun.State)
-	}
-	if err := s.Deprecate(context.Background(), h, "again"); !errors.Is(err, store.ErrInvalidTransition) {
-		t.Fatalf("re-deprecation should fail, got %v", err)
-	}
-}
-
-func TestDeprecateFromActiveIsTerminal(t *testing.T) {
-	s := newFsstore(t)
-	h := putRule(t, s, "alpha")
-	if err := s.Tag(context.Background(), "v1", h); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Deprecate(context.Background(), h, "rolled out"); err != nil {
-		t.Fatalf("Deprecate: %v", err)
-	}
-	bun, err := s.GetBundle(context.Background(), h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bun.State != store.StateDeprecated {
-		t.Fatalf("state=%s want deprecated", bun.State)
-	}
-}
-
-func TestDeprecateUnknownHashReturnsNotFound(t *testing.T) {
-	s := newFsstore(t)
-	if err := s.Deprecate(context.Background(), store.Hash("missing"), "x"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("expected ErrNotFound, got %v", err)
-	}
-}
-
+// TestDeprecateRecordsTimestampAndReasonOnDisk is the fsstore-only
+// invariant: deprecated_at + deprecated_reason land in the artifacts
+// row so the audit read-model can answer "when and why was this
+// deprecated?". The conformance suite covers the typed-contract
+// behavior (state transition, terminality, ErrNotFound on unknown
+// hash); this test covers the on-disk column commitment.
 func TestDeprecateRecordsTimestampAndReasonOnDisk(t *testing.T) {
 	s := newFsstore(t)
 	h := putRule(t, s, "alpha")
@@ -69,11 +29,7 @@ func TestDeprecateRecordsTimestampAndReasonOnDisk(t *testing.T) {
 
 func readDeprecationRow(t *testing.T, s *fsstore.Store, h store.Hash) (int64, string) {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(s.Root(), "metadata.db"))
-	if err != nil {
-		t.Fatalf("reopen db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := reopenMetadataDB(t, s)
 	var (
 		ts     sql.NullInt64
 		reason sql.NullString
