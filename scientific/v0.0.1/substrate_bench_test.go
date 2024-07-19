@@ -199,6 +199,32 @@ func BenchmarkStoreResolveTag(b *testing.B) {
 	}
 }
 
+func BenchmarkStoreDeprecate(b *testing.B) {
+	ctx := context.Background()
+	s := newBenchStore(b)
+	// Deprecation is terminal; each iteration needs a distinct hash. Pre-
+	// create them outside the timed loop so the measurement covers only
+	// the UPDATE-under-tx cost the bar claims.
+	hashes := make([]store.Hash, b.N)
+	for i := range hashes {
+		h, err := s.Put(ctx, store.PutRequest{
+			SourceBytes: mkBytes(1024, int64(i)),
+			ContentType: store.ContentTypeCSV,
+			Metadata:    store.Metadata{CreatedBy: "bench"},
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		hashes[i] = h
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := s.Deprecate(ctx, hashes[i], "bench"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkStoreListTags_1000Tags(b *testing.B) {
 	ctx := context.Background()
 	s := newBenchStore(b)
