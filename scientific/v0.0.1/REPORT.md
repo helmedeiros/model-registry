@@ -2,7 +2,7 @@
 
 Pre-registered evaluation bars per the markup-svc/ADR-0012 protocol. Bars are committed in this file BEFORE measurement; bars do not move post-commit. Measured numbers are filled in only after the run.
 
-Status: bars pre-registered, micro-benches run on Apple M4 / NVMe SSD with `_journal_mode=WAL`, `_synchronous=FULL`, `_busy_timeout=5000`. The full substrate surface (Put / Get / Tag / Resolve / List / Deprecate) is now implemented; measured numbers will be locked across the substrate in the v0.0.1 re-run. E2E round-trip green.
+Status: full substrate surface (Put / Get / Tag / Resolve / List / Deprecate) implemented; fsstore runs the typed-Store conformance suite from `storetest.RunConformance`; v0.0.1 measurement set locked across all 12 micro-bars on Apple M4 / NVMe SSD with `_journal_mode=WAL`, `_synchronous=FULL`, `_busy_timeout=5000`. E2E round-trip green.
 
 ## Pre-registered bars
 
@@ -49,19 +49,22 @@ Every commit on `model-registry/main` keeps the data-plane smoke green (Iteratio
 
 Hardware: Apple M4 (10 cores, arm64, macOS), NVMe-class SSD via APFS. Substrate pragmas as committed: WAL + synchronous=FULL + busy_timeout=5s + foreign_keys=ON. `go test -tags=bench -benchtime=1s ./scientific/...`
 
-| Bench | Bar | Measured (ns/op) | Result | Headroom |
+| Bench | Bar | Measured | Result | Headroom |
 |---|---|---|---|---|
-| `BenchmarkStorePut_SmallArtifact` | < 15 ms | 9.26 ms | PASS | ~38% |
-| `BenchmarkStorePut_SmallArtifact_AllMembers` | < 25 ms | 17.75 ms | PASS | ~29% |
-| `BenchmarkStorePut_LargeArtifact` | < 200 ms | 10.85 ms | PASS | ~95% |
-| `BenchmarkStoreGetBundle` | < 5 ms | 7.46 µs | PASS | 3 orders of magnitude under |
-| `BenchmarkStoreGetMember_SmallSourceWarm` | < 5 ms | 18.60 µs | PASS | 2 orders under |
-| `BenchmarkStoreGetMember_LargeSource` | < 50 ms | 192.91 µs | PASS | 2 orders under |
-| `BenchmarkStoreTag` | < 10 ms | 78.69 µs | PASS | 2 orders under |
-| `BenchmarkStoreResolveTag` | < 5 ms | 7.23 µs | PASS | 2 orders under |
-| `BenchmarkStoreListTags_1000Tags` | < 10 ms | 1.09 ms | PASS | ~89% |
+| `BenchmarkStorePut_SmallArtifact` | < 15 ms | 9.18 ms | PASS | ~39% |
+| `BenchmarkStorePut_SmallArtifact_AllMembers` | < 25 ms | 17.59 ms | PASS | ~30% |
+| `BenchmarkStorePut_LargeArtifact` | < 200 ms | 9.98 ms | PASS | ~95% |
+| `BenchmarkStoreGetBundle` | < 5 ms | 7.32 µs | PASS | 3 orders under |
+| `BenchmarkStoreGetMember_SmallSourceWarm` | < 5 ms | 18.33 µs | PASS | 2 orders under |
+| `BenchmarkStoreGetMember_LargeSource` | < 50 ms | 185.16 µs | PASS | 2 orders under |
+| `BenchmarkStoreTag` | < 10 ms | 76.08 µs | PASS | 2 orders under |
+| `BenchmarkStoreResolveTag` | < 5 ms | 7.46 µs | PASS | 2 orders under |
+| `BenchmarkStoreDeprecate` | < 10 ms | 70.39 µs | PASS | 2 orders under |
+| `BenchmarkStoreList_1000Artifacts_AllStates` | < 50 ms | 1.36 ms | PASS | ~97% |
+| `BenchmarkStoreList_1000Artifacts_StateFiltered` | < 50 ms | 0.60 ms | PASS | ~98% |
+| `BenchmarkStoreListTags_1000Tags` | < 10 ms | 1.15 ms | PASS | ~88% |
 
-Allocation profile: GetBundle 1.5 KB / 52 allocs; GetMember small 12.5 KB / 31 allocs; GetMember large 2.1 MB / 31 allocs (dominated by the cloned source slice — ADR-0002 isolation invariant). All bars hold with comfortable margin.
+Allocation profile (selected): GetBundle 1.5 KB / 52 allocs; GetMember small 12.5 KB / 31 allocs; GetMember large 2.1 MB / 31 allocs (dominated by the cloned source slice — ADR-0002 isolation invariant); List 1000 artifacts all-states 445 KB / 17k allocs; StateFiltered 293 KB / 8.5k allocs at half the row count. All bars hold with comfortable margin.
 
 ### End-to-end run
 
@@ -69,8 +72,7 @@ Allocation profile: GetBundle 1.5 KB / 52 allocs; GetMember small 12.5 KB / 31 a
 
 ## Open items before tagging v0.0.1
 
-- Wire `fsstore_test.TestConformance` (chunk f) → contract suite proves fsstore satisfies the typed Store.
-- Re-run all benches on the same hardware to lock the v0.0.1 measurement set.
+None. All pre-registered bars hold; conformance is wired; E2E green. Ready to tag.
 
 ---
 
