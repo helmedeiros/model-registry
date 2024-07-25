@@ -7,6 +7,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.0.2] - 2024-07-25
+
+### Added
+
+- ADR-0003 Accepted: service shell + observability bootstrap. Locks the boot sequence, the middleware composition order, the configuration surface, and the substrate-binding contract.
+- `internal/observability/jsonlog/` — structured-log package emitting the platform shape `{time, level, msg, attrs}`. Levels (Debug/Info/Warn/Error) filter at emit time; below-threshold events allocate nothing. `ParseLevel` errors on unknown values so a typo'd `--log-level` surfaces at boot. `json.Marshal` runs outside the lock so reflect-driven map iteration does not stall concurrent emitters.
+- `internal/observability/metrics/prom/` — Prometheus adapter exposing `registry_http_requests_total{method,path,status}` (counter) and `registry_http_request_duration_seconds{method,path}` (histogram) against a private `*prometheus.Registry`. `BenchmarkRecordRequest` reads 94.5 ns/op on Apple M4 — inside the < 500 ns budget with ~5x headroom. Pinned at `github.com/prometheus/client_golang v1.14.0` matching the markup-svc revision in production.
+- `internal/observability/otel/` — Bootstrap returns a Tracer + Shutdown for the configured exporter (`none` no-op default or `otlp` gRPC). `WithServerSpan` middleware opens one `SpanKindServer` span per request named `registry.http.<METHOD>.<route>`, extracts W3C `traceparent` from inbound headers, marks 5xx as Error span status. `BenchmarkServerSpan_NoopTracer` reads 251.9 ns/op — inside ADR-0003's < 300 ns budget. Pinned at `go.opentelemetry.io/otel v1.11.2`.
+- `internal/httpapi/` — the operator-facing HTTP surface: `Healthz` / `Readyz` probes with the platform `{status, reason?}` body shape; `WithCorrelationID` middleware accepting or minting an X-Correlation-ID v4 UUID (encoded directly into a fixed `[36]byte` so the minting path stays a single allocation); `WithRecover` middleware catching panics into `registry.panic` via a one-method `PanicSink` interface; `WithAccessLog` middleware emitting `registry.access` with method/path/status/duration_ms + correlation_id + trace_id/span_id; `WithMetrics` middleware calling `prom.RecordRequest(method, route, status, duration)`; `NewRouter(Deps, metricsHandler)` composing the ADR-locked chain (Recover → CorrelationID → ServerSpan → AccessLog → Metrics → handler). `BenchmarkRouterChain_NoopTracer` reads 1,310 ns/op for the full chain — comfortably inside ADR-0003's < 100 µs total inbound overhead bar with ~75x headroom.
+- `internal/config/` — typed `Config` struct + `LoadFromArgs` accepting `--flag` (canonical) layered on `REGISTRY_*` env (12-factor convenience). Unknown values for `--store-backend` and `--otel-exporter` error at boot rather than silently defaulting. Defaults follow ADR-0003: `:8090`, `fs`, `./data`, `none`, `info`, `10s`.
+- `cmd/model-registry/main.go` — the testable boot entrypoint `Run(ctx, args, stdout, stderr, listener)`. Boot sequence: parse → jsonlog → OTel → Prometheus → Store (`fsstore` or `memstore`) → router → `http.Server` → `signal.NotifyContext` → graceful shutdown. The optional `net.Listener` parameter is the seam tests use to bind `:0` and learn the port. The readiness closure issues a `Limit:1` `List` against the store on every `/readyz` probe so a handle that went bad after open does not pass silently. Integration test boots the server end-to-end and asserts the full chain wires.
+
+### Changed
+
+- `internal/store/` exports shared pagination policy constants `DefaultListLimit` and `MaxListLimit` (was duplicated per backing in v0.0.1; hoisted so future backings cannot silently diverge).
+
 ## [0.0.1] - 2024-07-22
 
 ### Added
