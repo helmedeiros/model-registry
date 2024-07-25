@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — the boot sequence, the observability surface every operator-facing endpoint inherits, and the package layout that wires the `internal/store` substrate into `cmd/model-registry/main.go`. This ADR proposes; subsequent commits land the code that satisfies it and the status flips to Accepted when the substrate-only path is exercised by the end-to-end test against the live data plane.
+Accepted — the boot sequence, the observability surface every operator-facing endpoint inherits, and the package layout that wires the `internal/store` substrate into `cmd/model-registry/main.go`. The substrate-only path is now exercised end-to-end by `cmd/model-registry`'s integration test: a freshly booted server serves `/healthz`, `/readyz`, and `/metrics` through the full middleware chain (Recover → CorrelationID → ServerSpan → AccessLog → Metrics → handler), mints a correlation ID on the response, records the request in the Prometheus exposition, and shuts down cleanly on context cancel. The substrate-binding contract is honoured (the readiness closure issues a tiny `List` against the store).
 
 ## Context
 
@@ -52,7 +52,7 @@ internal/
 4. Initialise the Prometheus registry + collectors.
 5. Open the `fsstore` against the configured root. If `--store-backend=mem` is set (tests / smoke), bind `memstore` instead. The Store satisfies `store.Store`; the cmd layer never sees backing details.
 6. Mount HTTP handlers: `/healthz`, `/readyz`, `/metrics`. Operator endpoints land in later ADRs.
-7. Start the server. Log `registry.boot` with `attrs.{addr, store_backend, store_root, build_sha}`.
+7. Start the server. Log `registry.boot` with `attrs.{addr, store_backend, store_root, otel_exporter, log_level}`. (Adding `build_sha` requires CI ldflags wiring and is deferred to the iteration that introduces a release pipeline.)
 8. Block on signal. SIGTERM / SIGINT triggers graceful shutdown: stop accepting new connections, drain in-flight requests with a configurable timeout (default 10s), close the Store, log `registry.shutdown`.
 
 Any failure in steps 1–6 logs `registry.boot.failed` with the cause and exits non-zero. The server does not start in a partially-initialised state.
@@ -96,7 +96,7 @@ The fsstore handle is closed during the shutdown sequence (between draining in-f
 
 ### Observability hooks on the substrate
 
-The substrate (`internal/store`) is plain Go with no OTel instrumentation. The service shell wraps every operator-facing operation with the observability hooks listed above; the substrate calls themselves participate in the parent server span via context propagation. The cost of the wrapping is accounted for under `BenchmarkObservabilityOverhead` in the registry-package harness (< 100 µs per operation per ADR-0001), not under the Store bars committed in ADR-0002.
+The substrate (`internal/store`) is plain Go with no OTel instrumentation. The service shell wraps every operator-facing operation with the observability hooks listed above; the substrate calls themselves participate in the parent server span via context propagation. The cost of the wrapping is accounted for under `BenchmarkRouterChain_NoopTracer` in `internal/httpapi` (< 100 µs per operation per ADR-0001), not under the Store bars committed in ADR-0002.
 
 ## Consequences
 
@@ -117,17 +117,17 @@ The substrate (`internal/store`) is plain Go with no OTel instrumentation. The s
 
 ### Performance impact
 
-The shell's per-request overhead, pre-registered against the platform's measured baselines:
+The shell's per-request overhead. Per-hook figures are analytic estimates drawn from peer services in the arc (markup-svc/ADR-0009 noop-tracer overhead, ADR-0010 Prometheus instrumentation, ADR-0021 jsonlog access events). The end-to-end measurement is what binds:
 
-| Hook | Provisional cost | Bar |
+| Hook | Analytic estimate | Bar |
 |---|---|---|
 | `WithRecover` | ~50 ns (defer + recover with no panic) | < 1 µs |
-| `WithCorrelationID` | ~100 ns (header read + uuid.NewRandom on miss) | < 5 µs |
+| `WithCorrelationID` | ~100 ns (header read + uuid mint on miss) | < 5 µs |
 | `WithTraceContext` | ~300 ns (W3C extract; no-op exporter path) | < 5 µs |
 | `WithAccessLog` | ~1 µs (response wrapper + jsonlog marshal) | < 10 µs |
 | `WithMetrics` | ~500 ns (counter inc + histogram observe) | < 5 µs |
-| **Total inbound overhead** | ~2 µs expected | **< 100 µs** |
+| **Total inbound overhead** | sum of analytic estimates ≈ 2 µs | **< 100 µs** |
 
-The < 100 µs total bar matches the model-registry roadmap's `BenchmarkObservabilityOverhead`. Sources for the per-hook costs: markup-svc/ADR-0009 measured noop-tracer overhead at ~100 ns; markup-svc/ADR-0021 measured jsonlog access events at ~800 ns; markup-svc/ADR-0010 measured Prometheus instrumentation at ~400 ns. The expected ~2 µs leaves 50× headroom against the bar — defensible against regressions, not so tight it flakes under CI runner noise.
+**Measured:** `BenchmarkRouterChain_NoopTracer` in `internal/httpapi` reads **1,310 ns/op** (38 allocs, 3,309 B) on Apple M4 for the full chain on the no-op-tracer path — comfortably inside the < 100 µs bar with ~75× headroom. Marginal per-hook costs are below the analytic estimates once the test-recorder infrastructure is subtracted.
 
-Boot-time cost: substrate open (fsstore: `MkdirAll` + `sql.Open` + schema apply, ~50 ms on cold disk) + OTel init (~10 ms) + jsonlog init (~1 ms) + Prometheus init (~1 ms). Total cold-boot budget: < 500 ms. Hot-restart (existing root, warmed disk) is sub-100 ms.
+Boot-time cost: substrate open (fsstore: `MkdirAll` + `sql.Open` + schema apply, ~50 ms on cold disk) + OTel init (~10 ms) + jsonlog init (~1 ms) + Prometheus init (~1 ms). Total cold-boot budget: < 500 ms. Hot-restart timing is not yet measured; the cold-boot budget bounds the worst case.

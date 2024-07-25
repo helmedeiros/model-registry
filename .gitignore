@@ -3,3 +3,5 @@ coverage.out
 bin/
 .idea/
 .vscode/
+/model-registry
+/mrctl

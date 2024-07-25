@@ -1,0 +1,106 @@
+// Package config holds the typed Config the cmd shell binds via
+// --flag (canonical) and REGISTRY_* env (12-factor convenience). All
+// validation runs at boot — a typo'd value surfaces with a clear
+// error rather than silently defaulting.
+package config
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+// Config is the operator-facing configuration contract for the model-
+// registry binary. Defaults match ADR-0003.
+type Config struct {
+	Addr            string
+	StoreBackend    string
+	StoreRoot       string
+	OTelExporter    string
+	OTelEndpoint    string
+	LogLevel        string
+	ShutdownTimeout time.Duration
+}
+
+const (
+	StoreBackendFS  = "fs"
+	StoreBackendMem = "mem"
+)
+
+// Default returns a Config populated with the ADR-0003 defaults. The
+// cmd shell starts from Default and overlays flags + env.
+func Default() Config {
+	return Config{
+		Addr:            ":8090",
+		StoreBackend:    StoreBackendFS,
+		StoreRoot:       "./data",
+		OTelExporter:    "none",
+		OTelEndpoint:    "",
+		LogLevel:        "info",
+		ShutdownTimeout: 10 * time.Second,
+	}
+}
+
+// LoadFromArgs parses argv as flags layered on top of process env. The
+// returned *flag.FlagSet is exposed so the caller can redirect output
+// and print usage on error.
+func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
+	cfg := Default()
+	fs := flag.NewFlagSet("model-registry", flag.ContinueOnError)
+	fs.StringVar(&cfg.Addr, "addr", envOr("REGISTRY_ADDR", cfg.Addr), "HTTP listen address (e.g. :8090).")
+	fs.StringVar(&cfg.StoreBackend, "store-backend", envOr("REGISTRY_STORE_BACKEND", cfg.StoreBackend), "Store backing: fs|mem.")
+	fs.StringVar(&cfg.StoreRoot, "store-root", envOr("REGISTRY_STORE_ROOT", cfg.StoreRoot), "Filesystem root for the fs backing.")
+	fs.StringVar(&cfg.OTelExporter, "otel-exporter", envOr("REGISTRY_OTEL_EXPORTER", cfg.OTelExporter), "OTel span exporter: none|otlp.")
+	fs.StringVar(&cfg.OTelEndpoint, "otel-endpoint", envOr("REGISTRY_OTEL_ENDPOINT", cfg.OTelEndpoint), "OTLP collector address; required when --otel-exporter=otlp.")
+	fs.StringVar(&cfg.LogLevel, "log-level", envOr("REGISTRY_LOG_LEVEL", cfg.LogLevel), "Log level: debug|info|warn|error.")
+	// flag.DurationVar cannot be pre-seeded from env; bind a string
+	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
+	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())
+	fs.StringVar(&timeoutStr, "shutdown-timeout", timeoutStr, "Graceful drain budget (Go duration).")
+
+	if err := fs.Parse(args); err != nil {
+		return Config{}, fs, err
+	}
+
+	parsedTimeout, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		return Config{}, fs, fmt.Errorf("config: shutdown-timeout %q: %w", timeoutStr, err)
+	}
+	cfg.ShutdownTimeout = parsedTimeout
+
+	if err := cfg.Validate(); err != nil {
+		return Config{}, fs, err
+	}
+	return cfg, fs, nil
+}
+
+// Validate enforces cross-field invariants the flag library cannot.
+// Returns nil for a wirable Config.
+func (c Config) Validate() error {
+	switch c.StoreBackend {
+	case StoreBackendFS, StoreBackendMem:
+	default:
+		return fmt.Errorf("config: store-backend %q (want fs|mem)", c.StoreBackend)
+	}
+	switch strings.ToLower(c.OTelExporter) {
+	case "none", "otlp":
+	default:
+		return fmt.Errorf("config: otel-exporter %q (want none|otlp)", c.OTelExporter)
+	}
+	if strings.EqualFold(c.OTelExporter, "otlp") && strings.TrimSpace(c.OTelEndpoint) == "" {
+		return fmt.Errorf("config: otel-endpoint required when otel-exporter=otlp")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return fmt.Errorf("config: shutdown-timeout must be positive, got %s", c.ShutdownTimeout)
+	}
+	return nil
+}
+
+func envOr(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return fallback
+}
