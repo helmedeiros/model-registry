@@ -86,6 +86,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		PanicSink: logger,
 		Tracer:    tracer,
 		Ready:     readyFor(st),
+		Artifacts: st,
 	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),

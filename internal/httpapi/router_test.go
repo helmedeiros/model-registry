@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/helmedeiros/model-registry/internal/httpapi"
+	"github.com/helmedeiros/model-registry/internal/store/memstore"
 )
 
 func TestRouterServesHealthzReadyzMetrics(t *testing.T) {
@@ -112,6 +113,7 @@ func newRouterDeps(t *testing.T) (httpapi.Deps, http.HandlerFunc) {
 		PanicSink: &stubSink{},
 		Tracer:    tp.Tracer("router-test"),
 		Ready:     func() (string, bool) { return "", true },
+		Artifacts: memstore.New(),
 	}
 	scrape := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/helmedeiros/model-registry/internal/httpapi"
 	regotel "github.com/helmedeiros/model-registry/internal/observability/otel"
+	"github.com/helmedeiros/model-registry/internal/store/memstore"
 )
 
 // newRouterDepsForBench mirrors newRouterDeps but uses the no-op
@@ -30,6 +31,7 @@ func newRouterDepsForBench(b *testing.B) (httpapi.Deps, http.HandlerFunc) {
 		PanicSink: &stubSink{},
 		Tracer:    tracer,
 		Ready:     func() (string, bool) { return "", true },
+		Artifacts: memstore.New(),
 	}
 	scrape := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
