@@ -314,7 +314,7 @@ The JSON marshal cost is the dominant additional factor over the substrate bars;
 Per-endpoint latency is dominated by the substrate call + JSON marshal. At the 1000-item scale the substrate call alone is the measured `BenchmarkStoreList_1000Artifacts_AllStates` = 1.36 ms (over the 1 ms mark, not under it). At the 100-item scale the substrate cost is sub-millisecond. The chain overhead is the 1,310 ns ADR-0003 already measured. Total per-request budget on `/artifacts?limit=100`:
 
 - chain overhead: ~1.3 µs
-- substrate `List(Limit=100)` on fsstore: ~140–350 µs (linear extrapolation from 1.36 ms at 1000 items; the lower end is the proportional factor, the upper end includes the fixed SQLite query round-trip overhead the extrapolation omits — `BenchmarkGET_Artifacts_1000Items` pins the real number when the bench lands).
+- substrate `List(Limit=100)` on fsstore: ~136 µs proportional + fixed SQLite query overhead (not subtracted in the substrate measurement). `BenchmarkGET_Artifacts_100Items` pins the real number when the bench lands.
 - JSON marshal of 100 `ArtifactSummary`: ~50 µs (estimated; the same bench pins it).
 
 The `< 50 ms` bar leaves two orders of magnitude of headroom even against the upper bound — defensible against regressions, not so tight it flakes under CI runner noise.

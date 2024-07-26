@@ -49,6 +49,8 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	// exposition path is observable in Jaeger + Kibana.
 	mux.Handle("/metrics", chainNoMetrics(deps, "/metrics", metricsHandler))
 	mux.Handle("/artifacts", chain(deps, "/artifacts", Artifacts(deps.Artifacts)))
+	mux.Handle("/artifact/{hash}", chain(deps, "/artifact/{hash}", Artifact(deps.Artifacts)))
+	mux.Handle("/artifact/{hash}/{member}", chain(deps, "/artifact/{hash}/{member}", ArtifactMember(deps.Artifacts)))
 	return mux
 }
 
