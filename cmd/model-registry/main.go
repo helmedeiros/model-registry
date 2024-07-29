@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/helmedeiros/model-registry/internal/config"
+	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
 	"github.com/helmedeiros/model-registry/internal/observability/jsonlog"
 	"github.com/helmedeiros/model-registry/internal/observability/metrics/prom"
@@ -80,6 +81,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	}
 	defer func() { _ = closeStore() }()
 
+	envState := memstate.New()
 	deps := httpapi.Deps{
 		AccessLog: logger,
 		Metrics:   metrics,
@@ -87,6 +89,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		Tracer:    tracer,
 		Ready:     readyFor(st),
 		Artifacts: st,
+		EnvState:  envState,
 	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),

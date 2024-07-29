@@ -43,6 +43,8 @@ func TestRun_ServesHealthzReadyzMetricsAndShutsDownCleanly(t *testing.T) {
 		{"/metrics", http.StatusOK},
 		{"/artifacts", http.StatusOK},
 		{"/artifact/unknown", http.StatusNotFound},
+		{"/env/production/state", http.StatusOK},
+		{"/env/production/history", http.StatusOK},
 	} {
 		resp := mustGET(t, "http://"+addr+tc.path)
 		if resp.StatusCode != tc.want {

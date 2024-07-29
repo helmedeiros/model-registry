@@ -10,6 +10,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
 	"github.com/helmedeiros/model-registry/internal/store/memstore"
 )
@@ -114,6 +115,7 @@ func newRouterDeps(t *testing.T) (httpapi.Deps, http.HandlerFunc) {
 		Tracer:    tp.Tracer("router-test"),
 		Ready:     func() (string, bool) { return "", true },
 		Artifacts: memstore.New(),
+		EnvState:  memstate.New(),
 	}
 	scrape := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

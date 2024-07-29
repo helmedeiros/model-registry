@@ -32,3 +32,35 @@ type ArtifactPage struct {
 	Items      []ArtifactSummary `json:"items"`
 	NextCursor string            `json:"next_cursor,omitempty"`
 }
+
+// --- env-state ---
+
+type EnvRoleView struct {
+	Hash       string `json:"hash"`
+	PromotedBy string `json:"promoted_by"`
+	PromotedAt string `json:"promoted_at"`
+}
+
+type EnvStateView struct {
+	Env        string       `json:"env"`
+	Champion   *EnvRoleView `json:"champion"`
+	Challenger *EnvRoleView `json:"challenger"`
+	// Pointer so a fresh-env response carries `"updated_at": null`
+	// rather than an absent field — matches ADR-0004's envelope.
+	UpdatedAt *string `json:"updated_at"`
+}
+
+type EnvTransitionView struct {
+	Env      string `json:"env"`
+	Kind     string `json:"kind"`
+	FromHash string `json:"from_hash,omitempty"`
+	ToHash   string `json:"to_hash,omitempty"`
+	Operator string `json:"operator,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	At       string `json:"at"`
+}
+
+type EnvHistoryPage struct {
+	Items      []EnvTransitionView `json:"items"`
+	NextCursor string              `json:"next_cursor,omitempty"`
+}

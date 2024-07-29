@@ -5,24 +5,26 @@ import (
 
 	oteltrace "go.opentelemetry.io/otel/trace"
 
+	"github.com/helmedeiros/model-registry/internal/envstate"
 	regotel "github.com/helmedeiros/model-registry/internal/observability/otel"
 	"github.com/helmedeiros/model-registry/internal/store"
 )
 
 // Deps is the bundle of observability hooks + read-only substrate
 // accessors the Router weaves into the middleware chain. Every
-// observability field is required; Artifacts is required when the
-// read-only operator endpoints are mounted.
+// observability field is required; Artifacts and EnvState are
+// required when the read-only operator endpoints are mounted.
 type Deps struct {
 	AccessLog AccessSink
 	Metrics   MetricsRecorder
 	PanicSink PanicSink
 	Tracer    oteltrace.Tracer
 	Ready     Ready
-	// Artifacts is the Reader projection of the artifact substrate;
-	// the typed field enforces at compile time that the read-only
-	// endpoints cannot mutate.
+	// Reader-typed substrate fields enforce read-only at compile time;
+	// ADR-0005's write endpoints land on a parallel Deps slot, not by
+	// widening these.
 	Artifacts store.Reader
+	EnvState  envstate.Reader
 }
 
 // NewRouter returns an http.Handler serving the substrate-only HTTP
@@ -40,6 +42,9 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	if deps.Artifacts == nil {
 		panic("httpapi.NewRouter: Deps.Artifacts is required")
 	}
+	if deps.EnvState == nil {
+		panic("httpapi.NewRouter: Deps.EnvState is required")
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", chain(deps, "/healthz", Healthz()))
 	mux.Handle("/readyz", chain(deps, "/readyz", Readyz(deps.Ready)))
@@ -51,6 +56,8 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	mux.Handle("/artifacts", chain(deps, "/artifacts", Artifacts(deps.Artifacts)))
 	mux.Handle("/artifact/{hash}", chain(deps, "/artifact/{hash}", Artifact(deps.Artifacts)))
 	mux.Handle("/artifact/{hash}/{member}", chain(deps, "/artifact/{hash}/{member}", ArtifactMember(deps.Artifacts)))
+	mux.Handle("/env/{env}/state", chain(deps, "/env/{env}/state", EnvState(deps.EnvState)))
+	mux.Handle("/env/{env}/history", chain(deps, "/env/{env}/history", EnvHistory(deps.EnvState)))
 	return mux
 }
 
