@@ -64,3 +64,23 @@ type EnvHistoryPage struct {
 	Items      []EnvTransitionView `json:"items"`
 	NextCursor string              `json:"next_cursor,omitempty"`
 }
+
+// --- audit ---
+
+// AuditEntryView's operator/action/target are always-present per
+// ADR-0004; artifact_hash + reason are genuinely optional (a rollback
+// without a stated reason is allowed).
+type AuditEntryView struct {
+	ID           string `json:"id"`
+	Operator     string `json:"operator"`
+	Action       string `json:"action"`
+	Target       string `json:"target"`
+	ArtifactHash string `json:"artifact_hash,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	At           string `json:"at"`
+}
+
+type AuditPage struct {
+	Items      []AuditEntryView `json:"items"`
+	NextCursor string           `json:"next_cursor,omitempty"`
+}

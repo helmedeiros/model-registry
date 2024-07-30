@@ -5,6 +5,7 @@ import (
 
 	oteltrace "go.opentelemetry.io/otel/trace"
 
+	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/envstate"
 	regotel "github.com/helmedeiros/model-registry/internal/observability/otel"
 	"github.com/helmedeiros/model-registry/internal/store"
@@ -12,8 +13,9 @@ import (
 
 // Deps is the bundle of observability hooks + read-only substrate
 // accessors the Router weaves into the middleware chain. Every
-// observability field is required; Artifacts and EnvState are
-// required when the read-only operator endpoints are mounted.
+// field is required — ADR-0003's chain has no optional links and
+// ADR-0004's read endpoints are all required when the chain is
+// mounted.
 type Deps struct {
 	AccessLog AccessSink
 	Metrics   MetricsRecorder
@@ -25,6 +27,7 @@ type Deps struct {
 	// widening these.
 	Artifacts store.Reader
 	EnvState  envstate.Reader
+	Audit     audit.Reader
 }
 
 // NewRouter returns an http.Handler serving the substrate-only HTTP
@@ -39,12 +42,7 @@ type Deps struct {
 // /metrics without an enclosing WithMetrics so a scrape does not
 // self-record.
 func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
-	if deps.Artifacts == nil {
-		panic("httpapi.NewRouter: Deps.Artifacts is required")
-	}
-	if deps.EnvState == nil {
-		panic("httpapi.NewRouter: Deps.EnvState is required")
-	}
+	validateDeps(deps)
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", chain(deps, "/healthz", Healthz()))
 	mux.Handle("/readyz", chain(deps, "/readyz", Readyz(deps.Ready)))
@@ -58,7 +56,24 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	mux.Handle("/artifact/{hash}/{member}", chain(deps, "/artifact/{hash}/{member}", ArtifactMember(deps.Artifacts)))
 	mux.Handle("/env/{env}/state", chain(deps, "/env/{env}/state", EnvState(deps.EnvState)))
 	mux.Handle("/env/{env}/history", chain(deps, "/env/{env}/history", EnvHistory(deps.EnvState)))
+	mux.Handle("/audit", chain(deps, "/audit", Audit(deps.Audit)))
 	return mux
+}
+
+func validateDeps(deps Deps) {
+	required := []struct {
+		ok   bool
+		name string
+	}{
+		{deps.Artifacts != nil, "Artifacts"},
+		{deps.EnvState != nil, "EnvState"},
+		{deps.Audit != nil, "Audit"},
+	}
+	for _, r := range required {
+		if !r.ok {
+			panic("httpapi.NewRouter: Deps." + r.name + " is required")
+		}
+	}
 }
 
 func chain(deps Deps, route string, handler http.Handler) http.Handler {

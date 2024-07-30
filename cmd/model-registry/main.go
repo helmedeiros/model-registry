@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
 	"github.com/helmedeiros/model-registry/internal/config"
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
@@ -82,6 +83,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	defer func() { _ = closeStore() }()
 
 	envState := memstate.New()
+	auditLog := memaudit.New()
 	deps := httpapi.Deps{
 		AccessLog: logger,
 		Metrics:   metrics,
@@ -90,6 +92,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		Ready:     readyFor(st),
 		Artifacts: st,
 		EnvState:  envState,
+		Audit:     auditLog,
 	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),

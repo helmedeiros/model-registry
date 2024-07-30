@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
 	regotel "github.com/helmedeiros/model-registry/internal/observability/otel"
@@ -34,6 +35,7 @@ func newRouterDepsForBench(b *testing.B) (httpapi.Deps, http.HandlerFunc) {
 		Ready:     func() (string, bool) { return "", true },
 		Artifacts: memstore.New(),
 		EnvState:  memstate.New(),
+		Audit:     memaudit.New(),
 	}
 	scrape := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
