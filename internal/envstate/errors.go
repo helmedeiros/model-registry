@@ -1,10 +1,12 @@
 package envstate
 
-import "errors"
-
-var (
-	// ErrNotImplemented is returned by v0.0.3 Writer methods on
-	// backings that ship the Reader projection only. ADR-0005 lifecycle
-	// implementations replace these with the real transitions.
-	ErrNotImplemented = errors.New("envstate: writer not implemented in this release")
+import (
+	"errors"
+	"fmt"
 )
+
+// ErrNotImplemented wraps errors.ErrUnsupported so callers can use
+// `errors.Is(err, errors.ErrUnsupported)` to detect the missing
+// projection without importing this package. ADR-0005 lifecycle
+// implementations replace the stub with real transitions.
+var ErrNotImplemented = fmt.Errorf("envstate: writer not implemented: %w", errors.ErrUnsupported)
