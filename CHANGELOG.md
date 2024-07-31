@@ -7,6 +7,28 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.0.3] - 2024-07-31
+
+### Added
+
+- ADR-0004 Accepted: read-only operator endpoints + `cmd/mrctl` skeleton. Locks the read-only HTTP surface, the envstate + audit read-model packages with their conformance suites, and the CLI shape.
+- `GET /artifacts` — paginated list of artifact summaries (limit / cursor / state query params; `ArtifactPage` envelope; invalid_limit / invalid_state / limit_too_large error envelopes). `BenchmarkGET_Artifacts_*` against memstore: 606 ns / hash bundle, 2 µs / 10 KB member.
+- `GET /artifact/{hash}` — single bundle metadata returning `ArtifactBundle`; 404 not_found on unknown hash.
+- `GET /artifact/{hash}/{member}` — raw byte stream for source / snapshot / diagnose; Content-Type = the artifact's declared type for source / `application/octet-stream` for derived members; X-Artifact-Hash echo header; 404 not_found / 404 member_absent / 400 invalid_member error envelopes.
+- `GET /env/{env}/state` — current champion + challenger as nullable JSON roles; updated_at is an explicit `null` (not an absent field) on an unknown env so dashboards can scrape any env safely. `BenchmarkGET_EnvState` 559 ns/op.
+- `GET /env/{env}/history` — newest-first paginated env transitions (same limit / cursor shape). `BenchmarkGET_EnvHistory_100Entries` 18 µs/op.
+- `GET /audit` — newest-first paginated operator action log; `AuditPage` envelope with operator/action/target always-present, artifact_hash + reason genuinely optional. `BenchmarkGET_Audit_100Entries` 17.5 µs/op.
+- `internal/envstate/` — typed Reader/Writer/Store contract per ADR-0004. State (env + nullable champion/challenger Roles + updated_at), Role (hash + promoted_by + promoted_at), Transition (env + Kind enum + from/to hash + operator + reason + at). DefaultListLimit + MaxListLimit pagination policy. `internal/envstate/memstate` ships the Reader projection (Get deep-copies Role pointers so a future Writer mutating in place cannot bleed through); Writer methods return `envstate.ErrNotImplemented` (wrapping `errors.ErrUnsupported`) until ADR-0005's lifecycle ships. `internal/envstate/envstatetest` is the reusable conformance suite (8 subtests covering empty env, seeded read, deep-copy isolation, history ordering, pagination, unknown-cursor restart, limit clamping, Writer stub).
+- `internal/audit/` — typed Reader/Writer/Store contract. Entry (ULID id + operator + action + target + optional artifact hash + optional reason + at) — ID format documented so memaudit's sort tiebreaker on equal At is correct-by-contract. `internal/audit/memaudit` ships Reader with the same defensive-copy snapshot pattern as envstate; Writer returns `audit.ErrNotImplemented`. `internal/audit/audittest` is the reusable conformance suite (6 subtests). BenchmarkListSize_100Entries 2.4 µs/op, BenchmarkListSize_1000Entries 18.4 µs/op on the memaudit backing.
+- `cmd/mrctl` — read-only operator CLI. Subcommands `artifacts`, `artifact <hash> [member]`, `state <env>`, `history <env>`, `audit`; `--registry` flag (default `http://localhost:8090`); `--json` flag for pretty output; default-30s HTTP client timeout. `doStream` caps member byte streams at 512 MB. The W3C TextMapPropagator is configured explicitly from `Run` (no `init()` side effect) so importing the package as a library does not silently mutate process state. Integration test boots an `httptest.Server` wrapping the real router, drives every subcommand through it, decodes the wire envelopes round-trip, and verifies the CLI's parent TraceID propagates to the server-side SpanKindServer span.
+- `httpapi.Deps.Artifacts` / `Deps.EnvState` / `Deps.Audit` Reader-typed fields on the Router bundle — read-only at compile time. NewRouter validates via a single `validateDeps` loop that panics with a uniform message so a wiring miss fails fast at boot.
+
+### Changed
+
+- `internal/httpapi.NewRouter` mounts the five new ADR-0004 routes alongside the existing `/healthz` + `/readyz` + `/metrics`. Pattern wildcards (Go 1.22+ `ServeMux`) used for `/artifact/{hash}[/{member}]` and `/env/{env}/{state,history}`.
+- `envstate.ErrNotImplemented` and `audit.ErrNotImplemented` wrap `errors.ErrUnsupported` so callers can detect a missing Writer projection via the stdlib sentinel without importing the package.
+- Makefile `cover` filter now also excludes `envstatetest` and `audittest` from the coverage floor, same exception as `storetest`.
+
 ## [0.0.2] - 2024-07-25
 
 ### Added
