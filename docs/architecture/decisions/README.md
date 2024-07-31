@@ -22,4 +22,4 @@ NNNN-short-decision-name.md
 | [0001](0001-model-registry-architecture.md) | Model Registry — control plane for versioned pricing rule artifacts | ✅ Accepted |
 | [0002](0002-versioned-config-store-substrate.md) | Versioned Config Store — typed Go substrate | ✅ Accepted |
 | [0003](0003-service-shell-and-observability-bootstrap.md) | Service shell and observability bootstrap | ✅ Accepted |
-| [0004](0004-read-only-operator-endpoints.md) | Read-only operator endpoints | 🟡 Proposed |
+| [0004](0004-read-only-operator-endpoints.md) | Read-only operator endpoints | ✅ Accepted |

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — the read-only HTTP surface operators use to inspect the substrate without mutating it, the env-state and audit read-model packages those endpoints serve from, and the `cmd/mrctl` CLI skeleton that talks to them. This ADR proposes; subsequent commits land the code that satisfies it and the status flips to Accepted when every endpoint is exercised end-to-end by an integration test against the live server.
+Accepted — the read-only HTTP surface (`/artifacts`, `/artifact/{hash}` + `/artifact/{hash}/{member}`, `/env/{env}/state`, `/env/{env}/history`, `/audit`) wires end-to-end through the ADR-0003 middleware chain; the envstate and audit read-model packages each ship with a typed Reader/Writer contract + in-memory backing + reusable conformance suite (Writer methods return `ErrNotImplemented` until ADR-0005 lifecycle lands); `cmd/mrctl` talks to every endpoint with W3C `traceparent` propagation on every outbound call. The cmd-shell integration test boots the binary on a kernel-assigned port and probes every route; the mrctl integration test drives the CLI through `httptest.Server`-wrapped routers and decodes the wire envelopes round-trip.
 
 ## Context
 
@@ -311,7 +311,7 @@ The JSON marshal cost is the dominant additional factor over the substrate bars;
 
 ### Performance impact
 
-Per-endpoint latency is dominated by the substrate call + JSON marshal. For the artifact substrate, the 1000-item scale measurement is `BenchmarkStoreList_1000Artifacts_AllStates` = 1.36 ms (over the 1 ms mark) and the 100-item scale is sub-millisecond by proportional extrapolation. The env-state substrate has no analogous measurement yet — `BenchmarkGET_EnvHistory_100Entries` pins it once the fsstate backing lands; the bar below already anticipates the bound. The chain overhead is the 1,310 ns ADR-0003 already measured. Total per-request budget on `/artifacts?limit=100`:
+Per-endpoint latency is dominated by the substrate call + JSON marshal. For the artifact substrate, the 1000-item scale measurement is `BenchmarkStoreList_1000Artifacts_AllStates` = 1.36 ms (over the 1 ms mark); the 100-item scale is likely sub-millisecond once `BenchmarkGET_Artifacts_100Items` pins it (proportional extrapolation undercounts the SQLite fixed query-setup cost, so this is a hedge, not a measurement). The env-state substrate has no analogous measurement yet — `BenchmarkGET_EnvHistory_100Entries` pins it once the fsstate backing lands. The chain overhead is the 1,310 ns ADR-0003 already measured. Total per-request budget on `/artifacts?limit=100`:
 
 - chain overhead: ~1.3 µs
 - substrate `List(Limit=100)` on fsstore: ~136 µs proportional + fixed SQLite query overhead (not subtracted in the substrate measurement). `BenchmarkGET_Artifacts_100Items` pins the real number when the bench lands.

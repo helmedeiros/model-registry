@@ -1,7 +1,94 @@
-// Package main is the mrctl operator CLI entry point. Subcommands
-// land per-iteration: upload / promote / rollback / state / history /
-// audit / evaluate. ADR-0001 frames the architecture.
+// Package main is the mrctl operator CLI entry point. ADR-0004
+// specifies the subcommands; this binary implements the read-only
+// surface (artifacts, artifact, state, history, audit). The write
+// lifecycle (upload, promote, rollback) lands with ADR-0005.
 package main
 
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+)
+
+const (
+	defaultRegistry      = "http://localhost:8090"
+	defaultClientTimeout = 30 * time.Second
+)
+
 func main() {
+	os.Exit(Run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, nil))
+}
+
+// Run is the testable entrypoint. Returns the process exit code.
+// httpClient is the seam tests use to inject httptest.Server; production
+// callers pass nil and Run falls back to a default http.Client.
+func Run(ctx context.Context, args []string, stdout, stderr io.Writer, httpClient *http.Client) int {
+	configurePropagator()
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, usage())
+		return 2
+	}
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: defaultClientTimeout}
+	}
+	cmd, rest := args[0], args[1:]
+	switch cmd {
+	case "artifacts":
+		return runArtifacts(ctx, rest, stdout, stderr, httpClient)
+	case "artifact":
+		return runArtifact(ctx, rest, stdout, stderr, httpClient)
+	case "state":
+		return runState(ctx, rest, stdout, stderr, httpClient)
+	case "history":
+		return runHistory(ctx, rest, stdout, stderr, httpClient)
+	case "audit":
+		return runAudit(ctx, rest, stdout, stderr, httpClient)
+	case "-h", "--help", "help":
+		fmt.Fprintln(stdout, usage())
+		return 0
+	default:
+		fmt.Fprintf(stderr, "unknown subcommand %q\n\n%s\n", cmd, usage())
+		return 2
+	}
+}
+
+func usage() string {
+	return `mrctl — read-only operator CLI for the model-registry (ADR-0004)
+
+Subcommands:
+  artifacts [--limit N] [--state S] [--json]   list artifacts
+  artifact <hash> [--json]                     get one bundle
+  artifact <hash> <member>                     stream member bytes
+                                                  (source|snapshot|diagnose)
+  state <env> [--json]                         current env state
+  history <env> [--limit N] [--json]           env transition history
+  audit [--limit N] [--json]                   operator action log
+
+Flags:
+  --registry URL    registry base URL (default ` + defaultRegistry + `)`
+}
+
+// commonFlags bundles --registry across every subcommand.
+type commonFlags struct {
+	registry string
+	jsonOut  bool
+}
+
+func registerCommonFlags(fs *flag.FlagSet) *commonFlags {
+	c := &commonFlags{}
+	fs.StringVar(&c.registry, "registry", defaultRegistry, "registry base URL")
+	fs.BoolVar(&c.jsonOut, "json", false, "emit JSON instead of TSV")
+	return c
+}
+
+func parseFlags(fs *flag.FlagSet, args []string, stderr io.Writer) (int, bool) {
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2, false
+	}
+	return 0, true
 }
