@@ -1,7 +1,8 @@
 // Package envstatetest is the reusable conformance suite every
 // envstate backing runs against. A new backing implements its tests
 // as `storetest.RunConformance(t, factory)`-style hook (here as
-// `RunConformance`) and inherits the full Reader contract coverage.
+// `RunConformance`) and inherits the full Reader and Writer contract
+// coverage.
 package envstatetest
 
 import (
@@ -15,9 +16,10 @@ import (
 )
 
 // SeedFunc populates the store directly with fixture state/history,
-// bypassing the typed Writer projection (which returns
-// ErrNotImplemented in v0.0.3). Every conformance-running backing
-// must supply one — Reader-only contract checks depend on a seeded
+// bypassing the typed Writer projection. The Reader-only cases
+// established the contract before the Writer impls existed; the
+// Writer cases now rely on the real impls. Every backing must supply
+// a SeedFunc — Reader contract checks depend on a seeded
 // fixture and the suite fails loudly when SeedFunc is nil.
 type SeedFunc func(state envstate.State, history []envstate.Transition)
 
@@ -25,9 +27,9 @@ type SeedFunc func(state envstate.State, history []envstate.Transition)
 // SeedFunc for fixture setup. The *testing.T is the subtest's T.
 type Factory func(t *testing.T) (envstate.Store, SeedFunc)
 
-// RunConformance exercises every behaviour envstate.Reader promises
-// (Writer cases assert ErrNotImplemented until ADR-0005 lands real
-// implementations). Each subtest is independent.
+// RunConformance exercises every behaviour the envstate Reader and
+// Writer projections promise. Challenger Writer cases assert
+// ErrNotImplemented until ADR-0006. Each subtest is independent.
 func RunConformance(t *testing.T, factory Factory) {
 	t.Helper()
 	cases := []struct {
@@ -42,7 +44,16 @@ func RunConformance(t *testing.T, factory Factory) {
 		{"HistoryPaginatesViaCursor", testHistoryPaginates},
 		{"HistoryUnknownCursorRestarts", testHistoryUnknownCursor},
 		{"HistoryLimitDefaultsAndCaps", testHistoryLimitClamping},
-		{"WriterReturnsErrNotImplemented", testWriterStubbed},
+		{"PromoteChampionFromEmptyEnvSetsState", testPromoteFromEmpty},
+		{"PromoteChampionRecordsPreviousHash", testPromoteRecordsPrevious},
+		{"PromoteChampionAppendsHistory", testPromoteAppendsHistory},
+		{"PromoteChampionValidatesRequiredFields", testPromoteValidation},
+		{"RollbackChampionRestoresPreviousHash", testRollbackRestoresPrevious},
+		{"RollbackChampionWithRepeatedHashRestoresPrior", testRollbackRepeatedHash},
+		{"RollbackChampionWithoutHistoryErrors", testRollbackWithoutHistory},
+		{"RollbackChampionWithoutChampionErrors", testRollbackWithoutChampion},
+		{"GetReturnsDeepCopiedRoleAfterPromote", testGetDeepCopiesAfterPromote},
+		{"ChallengerWritersReturnErrNotImplemented", testChallengerStubbed},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, factory) })
@@ -210,14 +221,161 @@ func testHistoryLimitClamping(t *testing.T, mk Factory) {
 	}
 }
 
-func testWriterStubbed(t *testing.T, mk Factory) {
+func testPromoteFromEmpty(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", "first cut"); err != nil {
+		t.Fatalf("PromoteChampion: %v", err)
+	}
+	got, _ := s.Get(ctx(), "production")
+	if got.Champion == nil || got.Champion.Hash != "h1" || got.Champion.PromotedBy != "alice" {
+		t.Fatalf("state after promote: %+v", got)
+	}
+}
+
+func testPromoteRecordsPrevious(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PromoteChampion(ctx(), "production", store.Hash("h2"), "alice", "weekly"); err != nil {
+		t.Fatal(err)
+	}
+	page, _ := s.History(ctx(), "production", envstate.ListOptions{})
+	if len(page.Items) != 2 {
+		t.Fatalf("want 2 history entries, got %d", len(page.Items))
+	}
+	if page.Items[0].FromHash != "h1" || page.Items[0].ToHash != "h2" {
+		t.Fatalf("newest entry should record previous->new: %+v", page.Items[0])
+	}
+	if page.Items[1].FromHash != "" || page.Items[1].ToHash != "h1" {
+		t.Fatalf("first entry should have empty FromHash: %+v", page.Items[1])
+	}
+}
+
+func testPromoteAppendsHistory(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	for _, h := range []string{"a", "b", "c"} {
+		if err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, _ := s.History(ctx(), "production", envstate.ListOptions{})
+	if len(page.Items) != 3 {
+		t.Fatalf("want 3 history entries, got %d", len(page.Items))
+	}
+	for _, kind := range []envstate.Kind{page.Items[0].Kind, page.Items[1].Kind, page.Items[2].Kind} {
+		if kind != envstate.KindChampionPromoted {
+			t.Fatalf("kind=%s want champion_promoted", kind)
+		}
+	}
+}
+
+func testPromoteValidation(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	for _, tc := range []struct {
+		name string
+		env  string
+		hash store.Hash
+		op   string
+		want error
+	}{
+		{"empty env", "", "h", "alice", envstate.ErrEnvRequired},
+		{"empty hash", "p", "", "alice", envstate.ErrHashRequired},
+		{"empty operator", "p", "h", "", envstate.ErrOperatorRequired},
+	} {
+		if err := s.PromoteChampion(ctx(), tc.env, tc.hash, tc.op, ""); !errors.Is(err, tc.want) {
+			t.Fatalf("%s: err=%v want %v", tc.name, err, tc.want)
+		}
+	}
+}
+
+func testRollbackRestoresPrevious(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	for _, h := range []string{"h1", "h2"} {
+		if err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.RollbackChampion(ctx(), "production", "alice", "h2 misbehaved"); err != nil {
+		t.Fatalf("RollbackChampion: %v", err)
+	}
+	got, _ := s.Get(ctx(), "production")
+	if got.Champion == nil || got.Champion.Hash != "h1" {
+		t.Fatalf("after rollback champion=%+v want hash=h1", got.Champion)
+	}
+	page, _ := s.History(ctx(), "production", envstate.ListOptions{})
+	if page.Items[0].Kind != envstate.KindChampionRolledBack {
+		t.Fatalf("newest entry kind=%s want champion_rolled_back", page.Items[0].Kind)
+	}
+	if page.Items[0].FromHash != "h2" || page.Items[0].ToHash != "h1" {
+		t.Fatalf("rollback entry: %+v", page.Items[0])
+	}
+}
+
+// testRollbackRepeatedHash pins the previousChampionHash walk's
+// behaviour when a hash repeats: h1 → h2 → h1 then rollback must
+// restore h2, not h1 (the current). A naive "latest different ToHash"
+// walker would mistake the original h1 entry.
+func testRollbackRepeatedHash(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	for _, h := range []string{"h1", "h2", "h1"} {
+		if err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RollbackChampion(ctx(), "production", "alice", ""); err != nil {
+		t.Fatalf("RollbackChampion: %v", err)
+	}
+	got, _ := s.Get(ctx(), "production")
+	if got.Champion == nil || got.Champion.Hash != "h2" {
+		t.Fatalf("after rollback champion=%+v want hash=h2", got.Champion)
+	}
+}
+
+func testRollbackWithoutHistory(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	err := s.RollbackChampion(ctx(), "production", "alice", "")
+	if !errors.Is(err, envstate.ErrNoPreviousChampion) {
+		t.Fatalf("err=%v want ErrNoPreviousChampion", err)
+	}
+}
+
+func testRollbackWithoutChampion(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	err := s.RollbackChampion(ctx(), "production", "alice", "")
+	if !errors.Is(err, envstate.ErrNoChampion) {
+		t.Fatalf("err=%v want ErrNoChampion", err)
+	}
+}
+
+// testGetDeepCopiesAfterPromote confirms cloneState is exercised on
+// the Writer path, not only after direct seed injection — the seed-
+// path version (testGetDeepCopiesRole) only covers the cloneState in
+// Get; this one proves Promote-then-Get also clones.
+func testGetDeepCopiesAfterPromote(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := s.Get(ctx(), "production")
+	first.Champion.PromotedBy = "MUTATED"
+
+	second, _ := s.Get(ctx(), "production")
+	if second.Champion.PromotedBy != "alice" {
+		t.Fatalf("mutation bled through deep-copy: %+v", second.Champion)
+	}
+}
+
+func testChallengerStubbed(t *testing.T, mk Factory) {
 	s, _ := mk(t)
 	for _, call := range []struct {
 		name string
 		fn   func() error
 	}{
-		{"PromoteChampion", func() error { return s.PromoteChampion(ctx(), "p", store.Hash("h"), "op", "r") }},
-		{"RollbackChampion", func() error { return s.RollbackChampion(ctx(), "p", "op", "r") }},
 		{"PromoteChallenger", func() error { return s.PromoteChallenger(ctx(), "p", store.Hash("h"), "op", "r") }},
 		{"RejectChallenger", func() error { return s.RejectChallenger(ctx(), "p", "op", "r") }},
 	} {
