@@ -1,7 +1,6 @@
 // Package audit is the append-only operator action log (ADR-0004).
 // Reader.List returns recent entries newest-first; Writer.Record
-// appends. v0.0.3 backings implement Reader only — Writer returns
-// ErrNotImplemented until ADR-0005's lifecycle endpoints land their
+// appends. ADR-0005's lifecycle endpoints land the real Record
 // implementations on the same typed contract.
 package audit
 
@@ -62,8 +61,23 @@ type Store interface {
 
 // ErrNotImplemented wraps errors.ErrUnsupported so callers can use
 // `errors.Is(err, errors.ErrUnsupported)` to detect the missing
-// projection without importing this package.
+// projection without importing this package. Retained for future
+// Writer slots that may not ship implementations together with the
+// rest of the projection.
 var ErrNotImplemented = fmt.Errorf("audit: writer not implemented: %w", errors.ErrUnsupported)
+
+// Record validation sentinels — returned by Writer.Record when the
+// minimum-meaningful audit-entry fields are missing. A non-validated
+// entry would silently devalue the audit trail; each Record call must
+// carry enough context to answer "who, what, where, when".
+var (
+	ErrIDRequired       = errors.New("audit: id required")
+	ErrOperatorRequired = errors.New("audit: operator required")
+	ErrActionRequired   = errors.New("audit: action required")
+	ErrTargetRequired   = errors.New("audit: target required")
+	ErrAtRequired       = errors.New("audit: at required")
+	ErrDuplicateID      = errors.New("audit: duplicate id")
+)
 
 // Pagination policy.
 const (

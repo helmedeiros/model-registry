@@ -20,9 +20,9 @@ type SeedFunc func(entries []audit.Entry)
 // Factory builds a fresh audit.Store + SeedFunc.
 type Factory func(t *testing.T) (audit.Store, SeedFunc)
 
-// RunConformance exercises every behaviour audit.Reader promises.
-// Writer cases assert ErrNotImplemented until ADR-0005 lands real
-// implementations.
+// RunConformance exercises every behaviour audit.Reader and Writer
+// promise. Writer cases verify append, duplicate rejection, and
+// required-field validation.
 func RunConformance(t *testing.T, factory Factory) {
 	t.Helper()
 	cases := []struct {
@@ -34,7 +34,9 @@ func RunConformance(t *testing.T, factory Factory) {
 		{"ListPaginatesViaCursor", testListPaginates},
 		{"ListUnknownCursorRestarts", testListUnknownCursor},
 		{"ListLimitDefaultsAndCaps", testListLimitClamping},
-		{"RecordReturnsErrNotImplemented", testRecordStubbed},
+		{"RecordAppendsEntry", testRecordAppendsEntry},
+		{"RecordRefusesDuplicateID", testRecordRefusesDuplicateID},
+		{"RecordValidatesRequiredFields", testRecordValidation},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, factory) })
@@ -141,9 +143,68 @@ func testListLimitClamping(t *testing.T, mk Factory) {
 	}
 }
 
-func testRecordStubbed(t *testing.T, mk Factory) {
+func sampleEntry(id string, at time.Time) audit.Entry {
+	return audit.Entry{
+		ID:       id,
+		Operator: "alice",
+		Action:   "promote",
+		Target:   "env/production/champion",
+		At:       at,
+	}
+}
+
+func testRecordAppendsEntry(t *testing.T, mk Factory) {
 	s, _ := mk(t)
-	if err := s.Record(ctx(), audit.Entry{ID: "x"}); !errors.Is(err, audit.ErrNotImplemented) {
-		t.Fatalf("Record: err=%v want ErrNotImplemented", err)
+	entry := sampleEntry("01HXY00000000000000000000A", time.Unix(1_700_000_000, 0).UTC())
+	if err := s.Record(ctx(), entry); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	page, err := s.List(ctx(), audit.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != entry.ID {
+		t.Fatalf("List after Record: %+v", page)
+	}
+}
+
+func testRecordRefusesDuplicateID(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	entry := sampleEntry("01HXY00000000000000000000A", time.Unix(1_700_000_000, 0).UTC())
+	if err := s.Record(ctx(), entry); err != nil {
+		t.Fatal(err)
+	}
+	// Vary every non-ID field to prove the check discriminates on ID
+	// alone — a future change that hashed the full entry would pass
+	// the previous version of this test silently.
+	dup := audit.Entry{
+		ID:       entry.ID,
+		Operator: "bob",
+		Action:   "rollback",
+		Target:   "env/staging/champion",
+		At:       entry.At.Add(time.Second),
+	}
+	if err := s.Record(ctx(), dup); !errors.Is(err, audit.ErrDuplicateID) {
+		t.Fatalf("Record dup: err=%v want ErrDuplicateID", err)
+	}
+}
+
+func testRecordValidation(t *testing.T, mk Factory) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	for _, tc := range []struct {
+		name  string
+		entry audit.Entry
+		want  error
+	}{
+		{"empty id", audit.Entry{Operator: "a", Action: "promote", Target: "t", At: at}, audit.ErrIDRequired},
+		{"empty operator", audit.Entry{ID: "x", Action: "promote", Target: "t", At: at}, audit.ErrOperatorRequired},
+		{"empty action", audit.Entry{ID: "x", Operator: "a", Target: "t", At: at}, audit.ErrActionRequired},
+		{"empty target", audit.Entry{ID: "x", Operator: "a", Action: "promote", At: at}, audit.ErrTargetRequired},
+		{"zero at", audit.Entry{ID: "x", Operator: "a", Action: "promote", Target: "t"}, audit.ErrAtRequired},
+	} {
+		s, _ := mk(t)
+		if err := s.Record(ctx(), tc.entry); !errors.Is(err, tc.want) {
+			t.Fatalf("%s: err=%v want %v", tc.name, err, tc.want)
+		}
 	}
 }

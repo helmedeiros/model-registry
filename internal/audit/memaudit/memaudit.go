@@ -82,7 +82,34 @@ func cursorOf(e audit.Entry) string {
 	return e.At.UTC().Format(time.RFC3339Nano) + "|" + e.ID
 }
 
-// Record implements audit.Writer (stub for v0.0.3).
-func (s *Store) Record(_ context.Context, _ audit.Entry) error {
-	return audit.ErrNotImplemented
+// Record implements audit.Writer. Refuses duplicate IDs (ULID
+// uniqueness is a construction invariant; a repeat signals a
+// generator bug, not an idempotent retry) and serialises appends
+// under WLock.
+func (s *Store) Record(_ context.Context, entry audit.Entry) error {
+	if entry.ID == "" {
+		return audit.ErrIDRequired
+	}
+	if entry.Operator == "" {
+		return audit.ErrOperatorRequired
+	}
+	if entry.Action == "" {
+		return audit.ErrActionRequired
+	}
+	if entry.Target == "" {
+		return audit.ErrTargetRequired
+	}
+	if entry.At.IsZero() {
+		return audit.ErrAtRequired
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.entries {
+		if existing.ID == entry.ID {
+			return audit.ErrDuplicateID
+		}
+	}
+	s.entries = append(s.entries, entry)
+	return nil
 }
