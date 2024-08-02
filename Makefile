@@ -50,7 +50,7 @@ ifneq ($(HAS_GO),)
 	$(GO) test -race -count=1 -covermode=atomic -coverprofile=$(COVER_OUT) $(PKG)
 	@# Exclude test-scaffolding packages from the coverage floor. Extend
 	@# the alternation when adding new ones (e.g., httptest, fixtures).
-	@grep -vE '/(cmd|storetest|envstatetest|audittest)/' $(COVER_OUT) > $(COVER_OUT).prod || true
+	@grep -vE '/(cmd|storetest|envstatetest|audittest|instancestest)/' $(COVER_OUT) > $(COVER_OUT).prod || true
 	@mv $(COVER_OUT).prod $(COVER_OUT)
 	@if [ "$$(wc -l < $(COVER_OUT) | tr -d ' ')" -le 1 ]; then \
 	  echo "coverage: no executable statements -- vacuously pass"; \
