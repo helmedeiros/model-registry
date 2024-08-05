@@ -1,5 +1,7 @@
 package httpapi
 
+import "encoding/json"
+
 // Wire envelopes for the read-only operator endpoints. Kept separate
 // from internal store types so the public JSON shape is stable
 // against fields landing on the internal structs.
@@ -83,4 +85,16 @@ type AuditEntryView struct {
 type AuditPage struct {
 	Items      []AuditEntryView `json:"items"`
 	NextCursor string           `json:"next_cursor,omitempty"`
+}
+
+// --- upload (ADR-0005) ---
+
+type UploadResponse struct {
+	Hash  string `json:"hash"`
+	State string `json:"state"`
+	// Diagnose carries the bre-go diagnose result. v0.0.4 returns the
+	// raw bytes the operator uploaded as the diagnose part (or nil
+	// when no diagnose was supplied); the substrate-driven diagnose
+	// computation is a follow-up.
+	Diagnose json.RawMessage `json:"diagnose,omitempty"`
 }

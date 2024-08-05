@@ -188,8 +188,8 @@ Operator identity is `--operator` with `os.Getenv("USER")` as a convenience defa
 
 | Bench | Target | Note |
 |---|---|---|
-| `BenchmarkPOST_Upload_SmallArtifact` | < 200 ms | wraps `BenchmarkStorePut_SmallArtifact` (9.18 ms measured) with multipart parse + diagnose; the multipart + diagnose deltas are analytic estimates pending a `BenchmarkBreGoDiagnose_*` parked in Not closed. |
-| `BenchmarkPOST_Upload_LargeArtifact` | < 1 s | wraps `BenchmarkStorePut_LargeArtifact` (9.98 ms measured) at the 2 MB scale; 10× headroom over the upper diagnose estimate. Tighter bars need a measured diagnose bench. |
+| `BenchmarkPOST_Upload_SmallArtifact` | < 200 ms | (pre-registered; bench pending) wraps `BenchmarkStorePut_SmallArtifact` (9.18 ms measured) with multipart parse + diagnose; the multipart + diagnose deltas are analytic estimates pending a `BenchmarkBreGoDiagnose_*` parked in Not closed. |
+| `BenchmarkPOST_Upload_LargeArtifact` | < 1 s | (pre-registered; bench pending) wraps `BenchmarkStorePut_LargeArtifact` (9.98 ms measured) at the 2 MB scale; ~4-5× headroom over the upper diagnose estimate (9.98 ms + 200 ms ≈ 210 ms vs 1000 ms bar). Tighter bars need a measured diagnose bench. |
 | `BenchmarkPOST_Promote_3Replicas` | < 60 s | rolling push across 3 instances at the 10 s per-instance timeout. 2× safety margin over the 3 × 10 s analytical worst-case so CI is not flaky on a single slow `/readyz` poll. Tighten after the first measured runs show real wall-clock. |
 | `BenchmarkConcurrentOperatorAPI_10Concurrent` | < 500 ms p99 | ten concurrent `/promote` calls against ten distinct envs. The envs are logically independent but fsstate's WAL serializes the underlying writes; the bar pre-registers the analytic estimate (< 10 ms contention at this concurrency) — confirm on the first run before claiming "no contention" in prose elsewhere. |
 

@@ -21,6 +21,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/config"
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
+	"github.com/helmedeiros/model-registry/internal/ulid"
 	"github.com/helmedeiros/model-registry/internal/observability/jsonlog"
 	"github.com/helmedeiros/model-registry/internal/observability/metrics/prom"
 	regotel "github.com/helmedeiros/model-registry/internal/observability/otel"
@@ -84,6 +85,12 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 
 	envState := memstate.New()
 	auditLog := memaudit.New()
+	uploadDeps := httpapi.UploadDeps{
+		Substrate: st,
+		Audit:     auditLog,
+		ULID:      ulid.New(),
+		Logger:    logger,
+	}
 	deps := httpapi.Deps{
 		AccessLog: logger,
 		Metrics:   metrics,
@@ -93,6 +100,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		Artifacts: st,
 		EnvState:  envState,
 		Audit:     auditLog,
+		Upload:    &uploadDeps,
 	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),

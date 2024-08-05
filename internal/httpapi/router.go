@@ -22,12 +22,15 @@ type Deps struct {
 	PanicSink PanicSink
 	Tracer    oteltrace.Tracer
 	Ready     Ready
-	// Reader-typed substrate fields enforce read-only at compile time;
-	// ADR-0005's write endpoints land on a parallel Deps slot, not by
-	// widening these.
+	// Reader-typed substrate fields enforce read-only at compile time
+	// for the v0.0.3 read endpoints.
 	Artifacts store.Reader
 	EnvState  envstate.Reader
 	Audit     audit.Reader
+	// Upload carries the write dependencies for ADR-0005's POST /upload.
+	// nil disables the route — the read-only chain in v0.0.3 did not
+	// require a substrate writer.
+	Upload *UploadDeps
 }
 
 // NewRouter returns an http.Handler serving the substrate-only HTTP
@@ -57,6 +60,9 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	mux.Handle("/env/{env}/state", chain(deps, "/env/{env}/state", EnvState(deps.EnvState)))
 	mux.Handle("/env/{env}/history", chain(deps, "/env/{env}/history", EnvHistory(deps.EnvState)))
 	mux.Handle("/audit", chain(deps, "/audit", Audit(deps.Audit)))
+	if deps.Upload != nil {
+		mux.Handle("/upload", chain(deps, "/upload", Upload(*deps.Upload)))
+	}
 	return mux
 }
 

@@ -46,6 +46,9 @@ func TestRun_ServesHealthzReadyzMetricsAndShutsDownCleanly(t *testing.T) {
 		{"/env/production/state", http.StatusOK},
 		{"/env/production/history", http.StatusOK},
 		{"/audit", http.StatusOK},
+		// POST /upload via GET → 405 confirms the route mounted; the
+		// happy path is exercised by upload_test.go.
+		{"/upload", http.StatusMethodNotAllowed},
 	} {
 		resp := mustGET(t, "http://"+addr+tc.path)
 		if resp.StatusCode != tc.want {
