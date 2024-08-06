@@ -169,12 +169,12 @@ func (s *Store) PromoteChampion(_ context.Context, env string, h store.Hash, ope
 // write so a concurrent Promote cannot reshape state mid-rollback.
 // The clock read happens inside the lock for the same monotonic-
 // timestamp reason PromoteChampion does.
-func (s *Store) RollbackChampion(_ context.Context, env, operator, reason string) error {
+func (s *Store) RollbackChampion(_ context.Context, env, operator, reason string) (store.Hash, error) {
 	if env == "" {
-		return envstate.ErrEnvRequired
+		return "", envstate.ErrEnvRequired
 	}
 	if operator == "" {
-		return envstate.ErrOperatorRequired
+		return "", envstate.ErrOperatorRequired
 	}
 
 	s.mu.Lock()
@@ -183,11 +183,11 @@ func (s *Store) RollbackChampion(_ context.Context, env, operator, reason string
 
 	existing, ok := s.state[env]
 	if !ok || existing.Champion == nil {
-		return envstate.ErrNoChampion
+		return "", envstate.ErrNoChampion
 	}
 	previousChampion := previousChampionHash(s.history[env], existing.Champion.Hash)
 	if previousChampion == "" {
-		return envstate.ErrNoPreviousChampion
+		return "", envstate.ErrNoPreviousChampion
 	}
 
 	rolledFrom := existing.Champion.Hash
@@ -204,7 +204,30 @@ func (s *Store) RollbackChampion(_ context.Context, env, operator, reason string
 		Reason:   reason,
 		At:       now,
 	})
-	return nil
+	return previousChampion, nil
+}
+
+// PreviousChampion implements envstate.Reader. Read-only equivalent of
+// RollbackChampion's history walk — same lock posture (RLock here),
+// same error semantics (ErrNoChampion / ErrNoPreviousChampion). The
+// handler uses this to fetch the source bytes BEFORE the deploy fires
+// so the rollback can be aborted cleanly if the previous artifact is
+// missing.
+func (s *Store) PreviousChampion(_ context.Context, env string) (store.Hash, error) {
+	if env == "" {
+		return "", envstate.ErrEnvRequired
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	existing, ok := s.state[env]
+	if !ok || existing.Champion == nil {
+		return "", envstate.ErrNoChampion
+	}
+	previous := previousChampionHash(s.history[env], existing.Champion.Hash)
+	if previous == "" {
+		return "", envstate.ErrNoPreviousChampion
+	}
+	return previous, nil
 }
 
 // previousChampionHash walks the transition log backwards to find the

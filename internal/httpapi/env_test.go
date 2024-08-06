@@ -12,6 +12,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/envstate"
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
+	"github.com/helmedeiros/model-registry/internal/store"
 )
 
 func TestEnvStateUnknownEnvReturnsEmptyEnvelope(t *testing.T) {
@@ -132,6 +133,10 @@ func (s stubEnvReader) Get(_ context.Context, _ string) (envstate.State, error) 
 
 func (s stubEnvReader) History(_ context.Context, _ string, _ envstate.ListOptions) (envstate.HistoryPage, error) {
 	return s.history, nil
+}
+
+func (s stubEnvReader) PreviousChampion(_ context.Context, _ string) (store.Hash, error) {
+	return "", envstate.ErrNoPreviousChampion
 }
 
 func TestEnvStateAndHistorySerializePopulatedEntries(t *testing.T) {

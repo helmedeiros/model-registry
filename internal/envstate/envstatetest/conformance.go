@@ -49,7 +49,9 @@ func RunConformance(t *testing.T, factory Factory) {
 		{"PromoteChampionAppendsHistory", testPromoteAppendsHistory},
 		{"PromoteChampionValidatesRequiredFields", testPromoteValidation},
 		{"RollbackChampionRestoresPreviousHash", testRollbackRestoresPrevious},
+		{"RollbackChampionReturnsRolledToHash", testRollbackReturnsRolledTo},
 		{"RollbackChampionWithRepeatedHashRestoresPrior", testRollbackRepeatedHash},
+		{"PreviousChampionMatchesRollbackResult", testPreviousChampionMatchesRollback},
 		{"RollbackChampionWithoutHistoryErrors", testRollbackWithoutHistory},
 		{"RollbackChampionWithoutChampionErrors", testRollbackWithoutChampion},
 		{"GetReturnsDeepCopiedRoleAfterPromote", testGetDeepCopiesAfterPromote},
@@ -297,7 +299,7 @@ func testRollbackRestoresPrevious(t *testing.T, mk Factory) {
 		}
 	}
 
-	if err := s.RollbackChampion(ctx(), "production", "alice", "h2 misbehaved"); err != nil {
+	if _, err := s.RollbackChampion(ctx(), "production", "alice", "h2 misbehaved"); err != nil {
 		t.Fatalf("RollbackChampion: %v", err)
 	}
 	got, _ := s.Get(ctx(), "production")
@@ -313,6 +315,48 @@ func testRollbackRestoresPrevious(t *testing.T, mk Factory) {
 	}
 }
 
+func testRollbackReturnsRolledTo(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h2"), "alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	rolled, err := s.RollbackChampion(ctx(), "production", "alice", "")
+	if err != nil {
+		t.Fatalf("RollbackChampion: %v", err)
+	}
+	if rolled != store.Hash("h1") {
+		t.Fatalf("returned hash=%q want h1", rolled)
+	}
+}
+
+func testPreviousChampionMatchesRollback(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h2"), "alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := s.PreviousChampion(ctx(), "production")
+	if err != nil {
+		t.Fatalf("PreviousChampion: %v", err)
+	}
+	rolled, err := s.RollbackChampion(ctx(), "production", "alice", "")
+	if err != nil {
+		t.Fatalf("RollbackChampion: %v", err)
+	}
+	if preview != rolled {
+		t.Fatalf("preview=%q rolled=%q — single-threaded race-free path must match", preview, rolled)
+	}
+
+	if _, err := s.PreviousChampion(ctx(), "unknown-env"); !errors.Is(err, envstate.ErrNoChampion) {
+		t.Fatalf("PreviousChampion(unknown): err=%v want ErrNoChampion", err)
+	}
+}
+
 // testRollbackRepeatedHash pins the previousChampionHash walk's
 // behaviour when a hash repeats: h1 → h2 → h1 then rollback must
 // restore h2, not h1 (the current). A naive "latest different ToHash"
@@ -324,7 +368,7 @@ func testRollbackRepeatedHash(t *testing.T, mk Factory) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.RollbackChampion(ctx(), "production", "alice", ""); err != nil {
+	if _, err := s.RollbackChampion(ctx(), "production", "alice", ""); err != nil {
 		t.Fatalf("RollbackChampion: %v", err)
 	}
 	got, _ := s.Get(ctx(), "production")
@@ -338,7 +382,7 @@ func testRollbackWithoutHistory(t *testing.T, mk Factory) {
 	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
 		t.Fatal(err)
 	}
-	err := s.RollbackChampion(ctx(), "production", "alice", "")
+	_, err := s.RollbackChampion(ctx(), "production", "alice", "")
 	if !errors.Is(err, envstate.ErrNoPreviousChampion) {
 		t.Fatalf("err=%v want ErrNoPreviousChampion", err)
 	}
@@ -346,7 +390,7 @@ func testRollbackWithoutHistory(t *testing.T, mk Factory) {
 
 func testRollbackWithoutChampion(t *testing.T, mk Factory) {
 	s, _ := mk(t)
-	err := s.RollbackChampion(ctx(), "production", "alice", "")
+	_, err := s.RollbackChampion(ctx(), "production", "alice", "")
 	if !errors.Is(err, envstate.ErrNoChampion) {
 		t.Fatalf("err=%v want ErrNoChampion", err)
 	}

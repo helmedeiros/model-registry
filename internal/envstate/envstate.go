@@ -71,9 +71,15 @@ type HistoryPage struct {
 
 // Reader is the read-only projection used by GET /env/{env}/state and
 // /env/{env}/history.
+//
+// PreviousChampion previews the hash a RollbackChampion would restore
+// the env to without mutating state. Returns ErrNoChampion when the
+// env has no current champion and ErrNoPreviousChampion when the env
+// has a champion but no prior promotion to restore.
 type Reader interface {
 	Get(ctx context.Context, env string) (State, error)
 	History(ctx context.Context, env string, opts ListOptions) (HistoryPage, error)
+	PreviousChampion(ctx context.Context, env string) (store.Hash, error)
 }
 
 // Writer mutates env state. Lifecycle endpoints in ADR-0005 supply the
@@ -86,7 +92,11 @@ type Reader interface {
 // return means the env had no prior champion.
 type Writer interface {
 	PromoteChampion(ctx context.Context, env string, h store.Hash, operator, reason string) (store.Hash, error)
-	RollbackChampion(ctx context.Context, env string, operator, reason string) error
+	// RollbackChampion restores the prior champion from history and
+	// returns the hash it actually set. Under concurrent promotes the
+	// returned value may differ from a preceding PreviousChampion
+	// preview — callers should compare and log the divergence.
+	RollbackChampion(ctx context.Context, env string, operator, reason string) (store.Hash, error)
 	PromoteChallenger(ctx context.Context, env string, h store.Hash, operator, reason string) error
 	RejectChallenger(ctx context.Context, env string, operator, reason string) error
 }

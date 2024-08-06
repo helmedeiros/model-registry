@@ -109,6 +109,15 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	}
 	if promoteDeps, err := buildPromoteDeps(cfg, st, envState, auditLog, idgen, logger); err == nil {
 		deps.Promote = promoteDeps
+		deps.Rollback = &httpapi.RollbackDeps{
+			Artifacts: promoteDeps.Artifacts,
+			EnvState:  promoteDeps.EnvState,
+			Audit:     promoteDeps.Audit,
+			Discovery: promoteDeps.Discovery,
+			Deployer:  promoteDeps.Deployer,
+			ULID:      promoteDeps.ULID,
+			Logger:    promoteDeps.Logger,
+		}
 	} else {
 		logger.Info("registry.promote.disabled", map[string]any{"reason": err.Error()})
 	}

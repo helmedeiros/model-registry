@@ -125,3 +125,18 @@ type PromoteResponse struct {
 	NewHash      string     `json:"new_hash"`
 	Deploy       DeployView `json:"deploy"`
 }
+
+// --- rollback (ADR-0005) ---
+
+type RollbackRequest struct {
+	Env      string `json:"env"`
+	Operator string `json:"operator"`
+	Reason   string `json:"reason"`
+}
+
+type RollbackResponse struct {
+	Env          string     `json:"env"`
+	PreviousHash string     `json:"previous_hash"`
+	RolledTo     string     `json:"rolled_to"`
+	Deploy       DeployView `json:"deploy"`
+}

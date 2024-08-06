@@ -24,6 +24,9 @@ func (s seededEnvReader) Get(_ context.Context, _ string) (envstate.State, error
 func (s seededEnvReader) History(_ context.Context, _ string, _ envstate.ListOptions) (envstate.HistoryPage, error) {
 	return s.history, nil
 }
+func (s seededEnvReader) PreviousChampion(_ context.Context, _ string) (store.Hash, error) {
+	return "", envstate.ErrNoPreviousChampion
+}
 
 // BenchmarkGET_EnvState pins the per-request cost of /env/{env}/state
 // against ADR-0004's < 5 ms bar. Memstore-style backing (in-memory

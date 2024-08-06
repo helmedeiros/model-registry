@@ -34,6 +34,9 @@ type Deps struct {
 	// Promote carries the write dependencies for ADR-0005's POST
 	// /promote. nil disables the route.
 	Promote *PromoteDeps
+	// Rollback carries the write dependencies for ADR-0005's POST
+	// /rollback. nil disables the route.
+	Rollback *RollbackDeps
 }
 
 // NewRouter returns an http.Handler serving the substrate-only HTTP
@@ -68,6 +71,9 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	}
 	if deps.Promote != nil {
 		mux.Handle("/promote", chain(deps, "/promote", Promote(*deps.Promote)))
+	}
+	if deps.Rollback != nil {
+		mux.Handle("/rollback", chain(deps, "/rollback", Rollback(*deps.Rollback)))
 	}
 	return mux
 }
