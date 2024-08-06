@@ -76,12 +76,16 @@ type Reader interface {
 	History(ctx context.Context, env string, opts ListOptions) (HistoryPage, error)
 }
 
-// Writer mutates env state. Lifecycle endpoints in ADR-0005 land
-// implementations; v0.0.3 backings return ErrNotImplemented so the
-// typed contract stays stable across the read-only release and the
-// lifecycle release.
+// Writer mutates env state. Lifecycle endpoints in ADR-0005 supply the
+// real implementations on champion methods; challenger methods stay
+// stubbed with ErrNotImplemented until ADR-0006.
+//
+// PromoteChampion returns the hash that was the champion BEFORE the
+// promote committed — captured under the same WLock that does the
+// write, so a concurrent /promote cannot make the value lie. An empty
+// return means the env had no prior champion.
 type Writer interface {
-	PromoteChampion(ctx context.Context, env string, h store.Hash, operator, reason string) error
+	PromoteChampion(ctx context.Context, env string, h store.Hash, operator, reason string) (store.Hash, error)
 	RollbackChampion(ctx context.Context, env string, operator, reason string) error
 	PromoteChallenger(ctx context.Context, env string, h store.Hash, operator, reason string) error
 	RejectChallenger(ctx context.Context, env string, operator, reason string) error

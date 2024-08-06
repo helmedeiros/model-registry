@@ -92,9 +92,36 @@ type AuditPage struct {
 type UploadResponse struct {
 	Hash  string `json:"hash"`
 	State string `json:"state"`
-	// Diagnose carries the bre-go diagnose result. v0.0.4 returns the
-	// raw bytes the operator uploaded as the diagnose part (or nil
-	// when no diagnose was supplied); the substrate-driven diagnose
-	// computation is a follow-up.
+	// Diagnose is the raw bytes the caller uploaded in the diagnose
+	// part, if any.
 	Diagnose json.RawMessage `json:"diagnose,omitempty"`
+}
+
+// --- promote (ADR-0005) ---
+
+type PromoteRequest struct {
+	Hash     string `json:"hash"`
+	Env      string `json:"env"`
+	Role     string `json:"role"`
+	Operator string `json:"operator"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+type InstanceResultView struct {
+	URL        string `json:"url"`
+	Status     string `json:"status"`
+	DurationMS int64  `json:"duration_ms"`
+	Error      string `json:"error,omitempty"`
+}
+
+type DeployView struct {
+	Instances []InstanceResultView `json:"instances"`
+	Outcome   string               `json:"outcome"`
+}
+
+type PromoteResponse struct {
+	Env          string     `json:"env"`
+	PreviousHash string     `json:"previous_hash,omitempty"`
+	NewHash      string     `json:"new_hash"`
+	Deploy       DeployView `json:"deploy"`
 }

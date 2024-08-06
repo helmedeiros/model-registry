@@ -126,15 +126,15 @@ func cursorOf(t envstate.Transition) string {
 // The clock read happens inside the lock so concurrent writes
 // produce a monotonic At sequence regardless of the goroutine
 // schedule.
-func (s *Store) PromoteChampion(_ context.Context, env string, h store.Hash, operator, reason string) error {
+func (s *Store) PromoteChampion(_ context.Context, env string, h store.Hash, operator, reason string) (store.Hash, error) {
 	if env == "" {
-		return envstate.ErrEnvRequired
+		return "", envstate.ErrEnvRequired
 	}
 	if h == "" {
-		return envstate.ErrHashRequired
+		return "", envstate.ErrHashRequired
 	}
 	if operator == "" {
-		return envstate.ErrOperatorRequired
+		return "", envstate.ErrOperatorRequired
 	}
 
 	s.mu.Lock()
@@ -161,7 +161,7 @@ func (s *Store) PromoteChampion(_ context.Context, env string, h store.Hash, ope
 		Reason:   reason,
 		At:       now,
 	})
-	return nil
+	return previous, nil
 }
 
 // RollbackChampion implements envstate.Writer. Restores the prior

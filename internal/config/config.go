@@ -22,6 +22,7 @@ type Config struct {
 	OTelEndpoint    string
 	LogLevel        string
 	ShutdownTimeout time.Duration
+	InstancesConfig string
 }
 
 const (
@@ -55,6 +56,7 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 	fs.StringVar(&cfg.OTelExporter, "otel-exporter", envOr("REGISTRY_OTEL_EXPORTER", cfg.OTelExporter), "OTel span exporter: none|otlp.")
 	fs.StringVar(&cfg.OTelEndpoint, "otel-endpoint", envOr("REGISTRY_OTEL_ENDPOINT", cfg.OTelEndpoint), "OTLP collector address; required when --otel-exporter=otlp.")
 	fs.StringVar(&cfg.LogLevel, "log-level", envOr("REGISTRY_LOG_LEVEL", cfg.LogLevel), "Log level: debug|info|warn|error.")
+	fs.StringVar(&cfg.InstancesConfig, "instances-config", envOr("REGISTRY_INSTANCES_CONFIG", cfg.InstancesConfig), "Path to JSON config mapping env -> markup-svc base URLs (enables POST /promote).")
 	// flag.DurationVar cannot be pre-seeded from env; bind a string
 	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
 	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())

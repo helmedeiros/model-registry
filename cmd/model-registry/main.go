@@ -17,10 +17,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
 	"github.com/helmedeiros/model-registry/internal/config"
+	"github.com/helmedeiros/model-registry/internal/deployer/rolling"
+	"github.com/helmedeiros/model-registry/internal/envstate"
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
+	"github.com/helmedeiros/model-registry/internal/instances/static"
 	"github.com/helmedeiros/model-registry/internal/ulid"
 	"github.com/helmedeiros/model-registry/internal/observability/jsonlog"
 	"github.com/helmedeiros/model-registry/internal/observability/metrics/prom"
@@ -85,10 +89,11 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 
 	envState := memstate.New()
 	auditLog := memaudit.New()
+	idgen := ulid.New()
 	uploadDeps := httpapi.UploadDeps{
 		Substrate: st,
 		Audit:     auditLog,
-		ULID:      ulid.New(),
+		ULID:      idgen,
 		Logger:    logger,
 	}
 	deps := httpapi.Deps{
@@ -101,6 +106,11 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		EnvState:  envState,
 		Audit:     auditLog,
 		Upload:    &uploadDeps,
+	}
+	if promoteDeps, err := buildPromoteDeps(cfg, st, envState, auditLog, idgen, logger); err == nil {
+		deps.Promote = promoteDeps
+	} else {
+		logger.Info("registry.promote.disabled", map[string]any{"reason": err.Error()})
 	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),
@@ -154,6 +164,25 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		return 1
 	}
 	return 0
+}
+
+func buildPromoteDeps(cfg config.Config, st store.Store, envState envstate.Store, auditLog audit.Writer, idgen httpapi.ULIDSource, logger httpapi.AccessSink) (*httpapi.PromoteDeps, error) {
+	if cfg.InstancesConfig == "" {
+		return nil, errors.New("instances-config not set")
+	}
+	discovery, err := static.Load(cfg.InstancesConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &httpapi.PromoteDeps{
+		Artifacts: st,
+		EnvState:  envState,
+		Audit:     auditLog,
+		Discovery: discovery,
+		Deployer:  rolling.New(),
+		ULID:      idgen,
+		Logger:    logger,
+	}, nil
 }
 
 func openStore(cfg config.Config) (store.Store, func() error, error) {

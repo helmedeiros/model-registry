@@ -31,6 +31,9 @@ type Deps struct {
 	// nil disables the route — the read-only chain in v0.0.3 did not
 	// require a substrate writer.
 	Upload *UploadDeps
+	// Promote carries the write dependencies for ADR-0005's POST
+	// /promote. nil disables the route.
+	Promote *PromoteDeps
 }
 
 // NewRouter returns an http.Handler serving the substrate-only HTTP
@@ -62,6 +65,9 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	mux.Handle("/audit", chain(deps, "/audit", Audit(deps.Audit)))
 	if deps.Upload != nil {
 		mux.Handle("/upload", chain(deps, "/upload", Upload(*deps.Upload)))
+	}
+	if deps.Promote != nil {
+		mux.Handle("/promote", chain(deps, "/promote", Promote(*deps.Promote)))
 	}
 	return mux
 }

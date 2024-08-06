@@ -223,7 +223,7 @@ func testHistoryLimitClamping(t *testing.T, mk Factory) {
 
 func testPromoteFromEmpty(t *testing.T, mk Factory) {
 	s, _ := mk(t)
-	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", "first cut"); err != nil {
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", "first cut"); err != nil {
 		t.Fatalf("PromoteChampion: %v", err)
 	}
 	got, _ := s.Get(ctx(), "production")
@@ -234,10 +234,10 @@ func testPromoteFromEmpty(t *testing.T, mk Factory) {
 
 func testPromoteRecordsPrevious(t *testing.T, mk Factory) {
 	s, _ := mk(t)
-	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PromoteChampion(ctx(), "production", store.Hash("h2"), "alice", "weekly"); err != nil {
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h2"), "alice", "weekly"); err != nil {
 		t.Fatal(err)
 	}
 	page, _ := s.History(ctx(), "production", envstate.ListOptions{})
@@ -255,7 +255,7 @@ func testPromoteRecordsPrevious(t *testing.T, mk Factory) {
 func testPromoteAppendsHistory(t *testing.T, mk Factory) {
 	s, _ := mk(t)
 	for _, h := range []string{"a", "b", "c"} {
-		if err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
+		if _, err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -283,7 +283,7 @@ func testPromoteValidation(t *testing.T, mk Factory) {
 		{"empty hash", "p", "", "alice", envstate.ErrHashRequired},
 		{"empty operator", "p", "h", "", envstate.ErrOperatorRequired},
 	} {
-		if err := s.PromoteChampion(ctx(), tc.env, tc.hash, tc.op, ""); !errors.Is(err, tc.want) {
+		if _, err := s.PromoteChampion(ctx(), tc.env, tc.hash, tc.op, ""); !errors.Is(err, tc.want) {
 			t.Fatalf("%s: err=%v want %v", tc.name, err, tc.want)
 		}
 	}
@@ -292,7 +292,7 @@ func testPromoteValidation(t *testing.T, mk Factory) {
 func testRollbackRestoresPrevious(t *testing.T, mk Factory) {
 	s, _ := mk(t)
 	for _, h := range []string{"h1", "h2"} {
-		if err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
+		if _, err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -320,7 +320,7 @@ func testRollbackRestoresPrevious(t *testing.T, mk Factory) {
 func testRollbackRepeatedHash(t *testing.T, mk Factory) {
 	s, _ := mk(t)
 	for _, h := range []string{"h1", "h2", "h1"} {
-		if err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
+		if _, err := s.PromoteChampion(ctx(), "production", store.Hash(h), "alice", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -335,7 +335,7 @@ func testRollbackRepeatedHash(t *testing.T, mk Factory) {
 
 func testRollbackWithoutHistory(t *testing.T, mk Factory) {
 	s, _ := mk(t)
-	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	err := s.RollbackChampion(ctx(), "production", "alice", "")
@@ -358,7 +358,7 @@ func testRollbackWithoutChampion(t *testing.T, mk Factory) {
 // Get; this one proves Promote-then-Get also clones.
 func testGetDeepCopiesAfterPromote(t *testing.T, mk Factory) {
 	s, _ := mk(t)
-	if err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
+	if _, err := s.PromoteChampion(ctx(), "production", store.Hash("h1"), "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	first, _ := s.Get(ctx(), "production")
