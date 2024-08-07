@@ -83,6 +83,34 @@ func doGET(ctx context.Context, c *http.Client, base, path string, query url.Val
 	return resp, nil
 }
 
+// postJSON POSTs body to base+path with the supplied Content-Type and
+// decodes the JSON response into v. Used by the write subcommands.
+func postJSON(ctx context.Context, c *http.Client, base, path string, body io.Reader, contentType string, v any) (int, error) {
+	u, err := buildURL(base, path, nil)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), body)
+	if err != nil {
+		return 0, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	resp, err := c.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("do request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("registry: %s: %s", resp.Status, string(raw))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+		return resp.StatusCode, fmt.Errorf("decode body: %w", err)
+	}
+	return resp.StatusCode, nil
+}
+
 func buildURL(base, path string, query url.Values) (*url.URL, error) {
 	u, err := url.Parse(base)
 	if err != nil {

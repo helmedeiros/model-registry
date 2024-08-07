@@ -1,7 +1,7 @@
-// Package main is the mrctl operator CLI entry point. ADR-0004
-// specifies the subcommands; this binary implements the read-only
-// surface (artifacts, artifact, state, history, audit). The write
-// lifecycle (upload, promote, rollback) lands with ADR-0005.
+// Package main is the mrctl operator CLI entry point. Subcommands
+// cover the read surface (ADR-0004: artifacts, artifact, state,
+// history, audit) and the write lifecycle (ADR-0005: upload,
+// promote, rollback).
 package main
 
 import (
@@ -47,6 +47,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, httpClien
 		return runHistory(ctx, rest, stdout, stderr, httpClient)
 	case "audit":
 		return runAudit(ctx, rest, stdout, stderr, httpClient)
+	case "upload":
+		return runUpload(ctx, rest, stdout, stderr, httpClient)
+	case "promote":
+		return runPromote(ctx, rest, stdout, stderr, httpClient)
+	case "rollback":
+		return runRollback(ctx, rest, stdout, stderr, httpClient)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage())
 		return 0
@@ -57,9 +63,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, httpClien
 }
 
 func usage() string {
-	return `mrctl — read-only operator CLI for the model-registry (ADR-0004)
+	return `mrctl — operator CLI for the model-registry
 
-Subcommands:
+Read subcommands (ADR-0004):
   artifacts [--limit N] [--state S] [--json]   list artifacts
   artifact <hash> [--json]                     get one bundle
   artifact <hash> <member>                     stream member bytes
@@ -67,6 +73,12 @@ Subcommands:
   state <env> [--json]                         current env state
   history <env> [--limit N] [--json]           env transition history
   audit [--limit N] [--json]                   operator action log
+
+Write subcommands (ADR-0005):
+  upload --file <path> [--snapshot <path>] [--diagnose <path>]
+                       [--operator <o>] [--description <d>] [--json]
+  promote --hash <h> --env <e> [--operator <o>] [--reason <r>] [--json]
+  rollback --env <e> [--operator <o>] --reason <r> [--json]
 
 Flags:
   --registry URL    registry base URL (default ` + defaultRegistry + `)`

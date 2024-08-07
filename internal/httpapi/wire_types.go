@@ -97,6 +97,17 @@ type UploadResponse struct {
 	Diagnose json.RawMessage `json:"diagnose,omitempty"`
 }
 
+// UploadMetadata is the JSON envelope a caller posts in the metadata
+// part of /upload. Mirrors store.Metadata's wire-relevant fields but
+// stays in the public wire layer so clients do not import
+// internal/store.
+type UploadMetadata struct {
+	CreatedBy        string `json:"created_by,omitempty"`
+	Description      string `json:"description,omitempty"`
+	SourceCommitSHA  string `json:"source_commit_sha,omitempty"`
+	DerivedByVersion string `json:"derived_by_version,omitempty"`
+}
+
 // --- promote (ADR-0005) ---
 
 type PromoteRequest struct {

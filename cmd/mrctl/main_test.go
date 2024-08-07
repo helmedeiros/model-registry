@@ -36,7 +36,7 @@ func TestRun_HelpExitsZero(t *testing.T) {
 		if code := Run(context.Background(), []string{flag}, &stdout, nil, nil); code != 0 {
 			t.Fatalf("%s exit=%d want 0", flag, code)
 		}
-		if !strings.Contains(stdout.String(), "Subcommands") {
+		if !strings.Contains(stdout.String(), "subcommands") {
 			t.Fatalf("%s output missing usage: %s", flag, stdout.String())
 		}
 	}
