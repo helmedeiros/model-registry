@@ -219,7 +219,7 @@ type Store interface { Reader; Writer }
 Same dual-backing + conformance pattern. Filesystem backing lives at `<store-root>/audit.db`:
 
 ```sql
-CREATE TABLE audit (
+CREATE TABLE audit_entry (
     id            TEXT PRIMARY KEY,  -- ULID for sortability + uniqueness
     operator      TEXT NOT NULL,
     action        TEXT NOT NULL,
@@ -229,7 +229,9 @@ CREATE TABLE audit (
     at            INTEGER NOT NULL
 );
 
-CREATE INDEX idx_audit_recent ON audit(at DESC);
+-- (at, id) two-column tiebreak: two entries minted in the same
+-- millisecond paginate deterministically via keyset cursor.
+CREATE INDEX idx_audit_entry_recent ON audit_entry(at DESC, id DESC);
 ```
 
 ### Boot wiring

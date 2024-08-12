@@ -151,11 +151,11 @@ memstate's `PromoteChampion` runs under a single WLock covering the entire snaps
 
 fsstate's equivalent runs under a write Tx that wraps the `UPDATE env_state` + `INSERT env_history` so a process kill mid-promotion either commits both rows or neither.
 
-memaudit's `Record` validates the ULID + appends. fsaudit runs under an `INSERT` Tx; ULID generation is the caller's responsibility (deployer + HTTP handlers).
+memaudit's `Record` validates the ULID + appends. fsaudit issues a single INSERT against the `audit_entry` PK — atomic at the SQLite statement level, no explicit Tx needed; ULID generation is the caller's responsibility (deployer + HTTP handlers).
 
 ### SQLite backings
 
-`internal/envstate/fsstate/` + `internal/audit/fsaudit/`. Same connection-pool + DSN pragma pattern as fsstore. Schema from ADR-0004 §Read-model packages applied at open. Each runs through its existing `envstatetest` / `audittest` conformance suite. Pre-registered fsstate + fsaudit micro-bars match ADR-0004's HTTP-layer bars at substrate latency.
+`internal/envstate/fsstate/` + `internal/audit/fsaudit/`. Same connection-pool + DSN pragma pattern as fsstore. Schema from ADR-0004 §Read-model packages applied at open. Each runs through its existing `envstatetest` / `audittest` conformance suite. Pre-registered fsaudit micro-bars (`BenchmarkFsauditList_100Entries < 5 ms/op`, `BenchmarkFsauditRecord < 5 ms/op`) sit below ADR-0004's HTTP-layer bars so the substrate has room under the handler-level budget.
 
 The cmd shell now opens three SQLite files under `--store-root`:
 

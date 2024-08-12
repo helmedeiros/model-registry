@@ -62,9 +62,9 @@ func testListOrdersByAtDesc(t *testing.T, mk Factory) {
 		t.Fatal("conformance requires SeedFunc; backing must provide one")
 	}
 	seed([]audit.Entry{
-		{ID: "a", Action: "promote", At: time.Unix(1, 0).UTC()},
-		{ID: "b", Action: "promote", At: time.Unix(2, 0).UTC()},
-		{ID: "c", Action: "promote", At: time.Unix(3, 0).UTC()},
+		seedEntry("a", time.Unix(1, 0).UTC()),
+		seedEntry("b", time.Unix(2, 0).UTC()),
+		seedEntry("c", time.Unix(3, 0).UTC()),
 	})
 	page, err := s.List(ctx(), audit.ListOptions{})
 	if err != nil {
@@ -75,15 +75,30 @@ func testListOrdersByAtDesc(t *testing.T, mk Factory) {
 	}
 }
 
+// seedEntry builds a fixture that satisfies Record's required-field
+// invariants (operator + action + target + at). fsaudit's schema
+// declares operator + target NOT NULL; memaudit has no such
+// constraint. Keeping fixtures Record-valid guarantees the two
+// backings see identical seeded state.
+func seedEntry(id string, at time.Time) audit.Entry {
+	return audit.Entry{
+		ID:       id,
+		Operator: "conformance-bot",
+		Action:   "promote",
+		Target:   "env/test",
+		At:       at,
+	}
+}
+
 func testListPaginates(t *testing.T, mk Factory) {
 	s, seed := mk(t)
 	if seed == nil {
 		t.Fatal("conformance requires SeedFunc; backing must provide one")
 	}
 	seed([]audit.Entry{
-		{ID: "a", At: time.Unix(1, 0).UTC()},
-		{ID: "b", At: time.Unix(2, 0).UTC()},
-		{ID: "c", At: time.Unix(3, 0).UTC()},
+		seedEntry("a", time.Unix(1, 0).UTC()),
+		seedEntry("b", time.Unix(2, 0).UTC()),
+		seedEntry("c", time.Unix(3, 0).UTC()),
 	})
 	p1, err := s.List(ctx(), audit.ListOptions{Limit: 2})
 	if err != nil {
@@ -107,7 +122,7 @@ func testListUnknownCursor(t *testing.T, mk Factory) {
 		t.Fatal("conformance requires SeedFunc; backing must provide one")
 	}
 	seed([]audit.Entry{
-		{ID: "a", At: time.Unix(1, 0).UTC()},
+		seedEntry("a", time.Unix(1, 0).UTC()),
 	})
 	page, err := s.List(ctx(), audit.ListOptions{Cursor: "no-such-cursor"})
 	if err != nil {
@@ -124,8 +139,8 @@ func testListLimitClamping(t *testing.T, mk Factory) {
 		t.Fatal("conformance requires SeedFunc; backing must provide one")
 	}
 	seed([]audit.Entry{
-		{ID: "a", At: time.Unix(1, 0).UTC()},
-		{ID: "b", At: time.Unix(2, 0).UTC()},
+		seedEntry("a", time.Unix(1, 0).UTC()),
+		seedEntry("b", time.Unix(2, 0).UTC()),
 	})
 	page, err := s.List(ctx(), audit.ListOptions{Limit: -5})
 	if err != nil {
