@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — the write surface that closes the read-only loop ADR-0004 opened, the deployer that pushes promoted artifacts to running markup-svc instances via the body-based reload contract from markup-svc/ADR-0030, the static-config instance discovery the deployer reads, the Writer projections on `envstate` and `audit` that v0.0.3 stubbed with `ErrNotImplemented`, and the SQLite backings (`fsstate` + `fsaudit`) that survive a restart. This ADR proposes; subsequent commits land the code that satisfies it and the status flips to Accepted when a `mrctl upload --file rules.csv && mrctl promote --hash <h> --env <e>` round-trip is exercised end-to-end by an integration test that boots a registry, boots a markup-svc, drives the CLI, asserts the promoted CSV reflects in `markup-svc /decide`, and asserts every transition lands in `envstate` + `audit`.
+Accepted — the write surface lands on a Reader/Writer hexagonal contract: `POST /upload` records artifact bytes and an audit entry; `POST /promote` updates `envstate`, appends the transition, and rolls out to every markup-svc instance the static discovery returns; `POST /rollback` walks back to the previous champion. Three SQLite backings now ship under one `--store-root` (`metadata.db` + `envstate.db` + `audit.db`); the cmd shell opens audit first / store last so shutdown drains in reverse — store, envstate, audit (audit writes drain last). The `mrctl upload / promote / rollback` write subcommands close the operator surface. The end-to-end integration test naming the previous Proposed → Accepted gate is the next chunk; v0.0.4 ships with the per-package conformance suites + the `TestRun_FSBackendOpensThreeSQLiteFiles` cmd-level proof.
 
 ## Context
 

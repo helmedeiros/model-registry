@@ -7,6 +7,29 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.0.4] - 2024-08-13
+
+### Added
+
+- ADR-0005 Accepted: champion lifecycle + markup-svc deployer. Locks the write surface (`POST /upload` / `POST /promote` / `POST /rollback`), the rolling deployer contract, the static-config instance discovery, the SQLite backings (`fsstate` + `fsaudit`) that survive a restart, and the mrctl write subcommands.
+- `POST /upload` — multipart source (+ optional snapshot / diagnose / metadata) recorded via the substrate. ULID-tagged audit entry; audit-failure logs `registry.upload.audit_failed` but returns 200 (the Put already committed, the audit-trail divergence is observability, not data loss). 413 errUploadTooLarge for over-ceiling payloads; 400 invalid_metadata / missing_source on malformed input.
+- `POST /promote` — env-state writer with the per-instance rolling deployer. Partial deploys commit state (failed instances need operator attention; the audit trail is the truth); `X-Partial-Deploy: true` on 207-class responses. challenger role returns 501 (well-formed, not implemented). PromoteChampion returns the prior hash so the response is race-free.
+- `POST /rollback` — env-state writer that previews the prior champion via `PreviousChampion` under a read-only Tx, rolls forward via `RollbackChampion`, deploys the rollback. `--reason` is mandatory because an unreasoned rollback devalues the audit trail; race detection logs `registry.rollback.race_detected` when the preview hash and the committed hash diverge.
+- `internal/envstate/fsstate` — SQLite-backed envstate.Store at `<store-root>/envstate.db`. WAL + synchronous=FULL + busy_timeout(5000) + foreign_keys(ON) DSN pragmas + SetMaxOpenConns(1) for single-writer serialisation. `env_state` (PK env) + `env_history` (PK env,at, indexed at DESC) tables. PromoteChampion + RollbackChampion run under one write Tx (the env_state UPDATE + env_history INSERT commit together or not at all). `monotonicAtMS` bumps the per-env timestamp strictly past `MAX(at)` so concurrent writes never collide on the PK. History uses SQL keyset pagination (`(at < ? OR (at = ? AND to_hash > ?))`); cursor format identical to memstate so the wire layer sees no difference across backings. `PreviousChampion` runs under a read-only Tx so the current-champion read and the prior-champion lookup see one snapshot.
+- `internal/audit/fsaudit` — SQLite-backed audit.Store at `<store-root>/audit.db`. Same DSN posture as fsstore/fsstate; `audit_entry` (PK id) with two-column `idx_audit_entry_recent(at DESC, id DESC)` index. Typed sqlite error inspection (`*sqlite.Error.Code` + SQLITE_CONSTRAINT_PRIMARYKEY / _UNIQUE) translates duplicate-id collisions to `audit.ErrDuplicateID`. List is keyset-paginated; unknown/malformed cursor restarts from the head. Pre-registered substrate micro-bars: `BenchmarkFsauditList_100Entries < 5 ms/op` (measured 78 µs/op on the harness machine, ~60× margin), `BenchmarkFsauditRecord < 5 ms/op` (measured 42 µs/op, ~118× margin).
+- `internal/instances/static` — JSON-config Discovery returning a typed `Instance` list. Eager URL validation at Load time so a malformed config fails boot, not first deploy. Defensive copy on Get so a future mutation in place cannot bleed through to the caller.
+- `internal/deployer/rolling` — per-instance push to `/admin/reload` followed by `/readyz` polling. Typed `Deployer.Deploy(ctx, hash, instances) (DeployResult, error)` contract returning a per-instance `Outcome` enum (Deployed / Failed / Skipped). W3C `traceparent` propagator injection on every outbound request so the markup-svc spans nest under the registry span. `ErrReadyzTimeout` sentinel for typed timeout detection.
+- `internal/ulid` — RFC-4122-shaped ULID generator with crypto/rand entropy + monotonic same-millisecond bump + Crockford base32 encoding. Used for the audit entry ID.
+- `cmd/mrctl` write subcommands — `upload --file <path> [--snapshot <p>] [--diagnose <p>] [--operator <o>] [--description <d>] [--source-commit-sha <s>] [--derived-by-version <v>] [--json]`; `promote --hash <h> --env <e> [--operator <o>] [--reason <r>] [--role <r>] [--json]`; `rollback --env <e> [--operator <o>] --reason <r> [--json]`. `defaultOperator` falls back to user.Current() then $USER. Multipart upload bodies are buffered fully into memory; the helper names the 3 × MaxBytes peak for the io.Pipe swap once payloads grow past the 16 MB ceiling. Shared `printDeployResult` between promote and rollback; shared `postJSON` helper extends client.go alongside the existing doJSON + doStream pair.
+- `cmd/model-registry` boot path opens three SQLite files under one `--store-root` when `--store-backend=fs`. Open order is audit → envstate → store; defer-LIFO drains shutdown in the ADR-0005 §168 order (store → envstate → audit) so audit writes drain last. `TestRun_FSBackendOpensThreeSQLiteFiles` boots Run with `--store-backend=fs` against `t.TempDir()` and asserts the three SQLite files materialise.
+
+### Changed
+
+- Conformance suite `envstatetest` accepts the new Writer contract: PromoteChampion returns (store.Hash, error); RollbackChampion returns the rolled-to hash; PreviousChampion is a Reader-side method.
+- Conformance suite `audittest` fixtures gain Operator + Target on every seeded entry — fsaudit's NOT NULL constraints would have rejected the previous empty-string seeds and the suite would have silently lost cross-backing parity.
+- ADR-0004 §audit schema block updates to the `audit_entry` table name + the two-column `idx_audit_entry_recent(at DESC, id DESC)` index the code actually uses.
+- ADR-0003 cold-boot budget unchanged at `< 500 ms`; ADR-0005 names the analytic upper bound for three-file open at ~150 ms (3 × ADR-0003's referenced 50 ms single-file cold-open, cold-cache).
+
 ## [0.0.3] - 2024-07-31
 
 ### Added
