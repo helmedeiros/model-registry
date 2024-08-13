@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -129,6 +131,59 @@ func TestRun_BootEmitsRegistryBootEvent(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("registry.boot not seen in logs:\n%s", logs.String())
+}
+
+func TestRun_FSBackendOpensThreeSQLiteFiles(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	root := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	done := make(chan int, 1)
+	go func() {
+		done <- Run(ctx, []string{
+			"--store-backend", "fs",
+			"--store-root", root,
+			"--otel-exporter", "none",
+			"--log-level", "warn",
+		}, io.Discard, io.Discard, ln)
+	}()
+	// The listener is pre-created by the test, so waitListening only
+	// proves the kernel queues connections — it does NOT prove Run has
+	// finished opening the three backings. A short stat poll waits for
+	// the files to appear; the assertion is the wiring, not the
+	// timing.
+	for _, name := range []string{"metadata.db", "envstate.db", "audit.db"} {
+		if !waitForFile(t, filepath.Join(root, name), 2*time.Second) {
+			t.Fatalf("expected %s under store-root, not found within budget", name)
+		}
+	}
+
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("Run exit=%d want 0 on clean shutdown", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not shut down within budget")
+	}
+}
+
+func waitForFile(t *testing.T, path string, budget time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
 }
 
 // --- helpers ---

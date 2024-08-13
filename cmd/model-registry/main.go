@@ -14,24 +14,27 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/helmedeiros/model-registry/internal/audit"
+	"github.com/helmedeiros/model-registry/internal/audit/fsaudit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
 	"github.com/helmedeiros/model-registry/internal/config"
 	"github.com/helmedeiros/model-registry/internal/deployer/rolling"
 	"github.com/helmedeiros/model-registry/internal/envstate"
+	"github.com/helmedeiros/model-registry/internal/envstate/fsstate"
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
 	"github.com/helmedeiros/model-registry/internal/instances/static"
-	"github.com/helmedeiros/model-registry/internal/ulid"
 	"github.com/helmedeiros/model-registry/internal/observability/jsonlog"
 	"github.com/helmedeiros/model-registry/internal/observability/metrics/prom"
 	regotel "github.com/helmedeiros/model-registry/internal/observability/otel"
 	"github.com/helmedeiros/model-registry/internal/store"
 	"github.com/helmedeiros/model-registry/internal/store/fsstore"
 	"github.com/helmedeiros/model-registry/internal/store/memstore"
+	"github.com/helmedeiros/model-registry/internal/ulid"
 )
 
 const instrumentationName = "github.com/helmedeiros/model-registry"
@@ -80,6 +83,24 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 
 	metrics := prom.New()
 
+	// Open order is reversed from ADR-0005's shutdown order so defer's
+	// LIFO sequence drains as the ADR specifies: store first → envstate
+	// → audit last. Partial-failure bail-outs only close what already
+	// opened, so reversing the source order is safe.
+	auditLog, closeAudit, err := openAudit(cfg)
+	if err != nil {
+		bootFailed(logger, "audit", err)
+		return 1
+	}
+	defer func() { _ = closeAudit() }()
+
+	envState, closeEnvState, err := openEnvState(cfg)
+	if err != nil {
+		bootFailed(logger, "envstate", err)
+		return 1
+	}
+	defer func() { _ = closeEnvState() }()
+
 	st, closeStore, err := openStore(cfg)
 	if err != nil {
 		bootFailed(logger, "store", err)
@@ -87,8 +108,6 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	}
 	defer func() { _ = closeStore() }()
 
-	envState := memstate.New()
-	auditLog := memaudit.New()
 	idgen := ulid.New()
 	uploadDeps := httpapi.UploadDeps{
 		Substrate: st,
@@ -200,6 +219,38 @@ func openStore(cfg config.Config) (store.Store, func() error, error) {
 		return memstore.New(), func() error { return nil }, nil
 	case config.StoreBackendFS:
 		s, err := fsstore.New(cfg.StoreRoot)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s, s.Close, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown store backend %q", cfg.StoreBackend)
+	}
+}
+
+// openEnvState opens the env-state backing matching cfg.StoreBackend.
+// The fs path keeps the file colocated with the artifact substrate.
+func openEnvState(cfg config.Config) (envstate.Store, func() error, error) {
+	switch cfg.StoreBackend {
+	case config.StoreBackendMem:
+		return memstate.New(), func() error { return nil }, nil
+	case config.StoreBackendFS:
+		s, err := fsstate.New(filepath.Join(cfg.StoreRoot, "envstate.db"))
+		if err != nil {
+			return nil, nil, err
+		}
+		return s, s.Close, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown store backend %q", cfg.StoreBackend)
+	}
+}
+
+func openAudit(cfg config.Config) (audit.Store, func() error, error) {
+	switch cfg.StoreBackend {
+	case config.StoreBackendMem:
+		return memaudit.New(), func() error { return nil }, nil
+	case config.StoreBackendFS:
+		s, err := fsaudit.New(filepath.Join(cfg.StoreRoot, "audit.db"))
 		if err != nil {
 			return nil, nil, err
 		}
