@@ -70,7 +70,7 @@ func failedResult() deployer.DeployResult {
 	}
 }
 
-func newPromoteDeps(t *testing.T, deploy deployer.DeployResult) (httpapi.PromoteDeps, store.Store, envstate.Store, audit.Reader, *captureSink) {
+func newPromoteDeps(t testing.TB, deploy deployer.DeployResult) (httpapi.PromoteDeps, store.Store, envstate.Store, audit.Reader, *captureSink) {
 	t.Helper()
 	st := memstore.New()
 	envState := memstate.New()
@@ -88,7 +88,7 @@ func newPromoteDeps(t *testing.T, deploy deployer.DeployResult) (httpapi.Promote
 	}, st, envState, au, sink
 }
 
-func putRule(t *testing.T, s store.Store, src []byte) store.Hash {
+func putRule(t testing.TB, s store.Store, src []byte) store.Hash {
 	t.Helper()
 	h, err := s.Put(context.Background(), store.PutRequest{
 		SourceBytes: src,
@@ -101,7 +101,7 @@ func putRule(t *testing.T, s store.Store, src []byte) store.Hash {
 	return h
 }
 
-func promoteBody(t *testing.T, r httpapi.PromoteRequest) *bytes.Buffer {
+func promoteBody(t testing.TB, r httpapi.PromoteRequest) *bytes.Buffer {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(r); err != nil {

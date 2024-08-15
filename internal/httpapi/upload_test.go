@@ -39,7 +39,7 @@ func (c *captureSink) Info(msg string, attrs map[string]any) {
 	c.attrs = attrs
 }
 
-func newUploadDeps(t *testing.T) (httpapi.UploadDeps, store.Store, audit.Reader, *captureSink) {
+func newUploadDeps(t testing.TB) (httpapi.UploadDeps, store.Store, audit.Reader, *captureSink) {
 	t.Helper()
 	st := memstore.New()
 	au := memaudit.New()
@@ -53,7 +53,7 @@ func newUploadDeps(t *testing.T) (httpapi.UploadDeps, store.Store, audit.Reader,
 	}, st, au, sink
 }
 
-func multipartBody(t *testing.T, parts map[string]uploadPart) (io.Reader, string) {
+func multipartBody(t testing.TB, parts map[string]uploadPart) (io.Reader, string) {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	w := multipart.NewWriter(buf)
