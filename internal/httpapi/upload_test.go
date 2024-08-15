@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,12 +23,12 @@ import (
 )
 
 type stubULID struct {
-	next int
+	next int64
 }
 
 func (s *stubULID) New() (string, error) {
-	s.next++
-	return "01HXYTEST" + string(rune('A'+s.next-1)), nil
+	n := atomic.AddInt64(&s.next, 1)
+	return fmt.Sprintf("01HXYTEST%020d", n), nil
 }
 
 type captureSink struct {

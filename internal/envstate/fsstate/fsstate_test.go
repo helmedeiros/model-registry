@@ -3,6 +3,7 @@ package fsstate
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -105,6 +106,24 @@ func TestNewIsIdempotent(t *testing.T) {
 	}
 	if got.Champion == nil || got.Champion.Hash != "h1" {
 		t.Fatalf("state lost across reopen: %+v", got)
+	}
+}
+
+// TestNewRejectsCorruptedFile covers what happens when --store-root
+// points at a path that exists but isn't a valid SQLite file (a
+// truncated file from a prior crashed write, or a leftover from
+// another tool). fsstate.New must surface a structured error rather
+// than silently treating the file as empty and overwriting state.
+func TestNewRejectsCorruptedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "envstate.db")
+	if err := os.WriteFile(path, []byte("not a sqlite file, just garbage bytes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := New(path)
+	if err == nil {
+		t.Fatal("expected error on corrupted file, got nil — fsstate would silently overwrite operator state")
 	}
 }
 
