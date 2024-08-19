@@ -48,6 +48,18 @@ The handler bars cover the operator-visible round-trip including the deployer's 
 - `BenchmarkBootTime_ThreeSQLiteFiles` rotates the store-root inside the loop so every iteration is a cold open. The defers' Close calls run with the timer stopped so the bench measures only the schema-bootstrap path.
 - Cmd-shell `TestRun_FSBackendOpensThreeSQLiteFiles` (`cmd/model-registry/main_test.go`) provides the integration-level proof that the same three files appear under `--store-root` when the binary boots.
 
-## Outstanding pre-registered work
+## Live-stack proof
 
-- Live-stack E2E (registry + markup-svc compose) — the ADR-0005.x revision gate; not a bar in this set, but the next-chunk integration proof.
+`scientific/v0.0.4/e2e_lifecycle_test.go` is the executable proof of the ADR-0005 §Status revision gate. Build-tagged `e2e`; operators run with `make e2e` against a markup-svc reachable at `MARKUP_SVC_URL` (default `http://localhost:8080`). The test boots the full model-registry in-process (memstore + memstate + memaudit + real rolling deployer + static discovery), drives the operator round-trip end-to-end:
+
+  POST /upload csvA → hashA
+  POST /promote {hashA, production} → rolling deploy to markup-svc /admin/reload
+  POST /decide (markup-svc) → asserts csvA rule fires
+  POST /upload csvB → hashB
+  POST /promote {hashB, production} → rolling deploy
+  POST /decide → asserts csvB rule fires
+  POST /rollback → rolling deploy back to csvA
+  POST /decide → asserts csvA rule fires again
+  GET /audit → asserts the five transitions land newest-first
+
+The test verifies (a) the rolling deployer pushes the real bytes the substrate stored, (b) the deployer talks the body-based reload contract markup-svc/ADR-0030 specifies, (c) the envstate transitions and audit entries land in lockstep with the deploys, and (d) the rollback contract restores the prior champion in both the registry's read-model and the data plane.
