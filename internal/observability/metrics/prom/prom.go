@@ -20,14 +20,22 @@ var httpBuckets = []float64{
 	0.025, 0.1, 0.5, 2.5, 10,
 }
 
-// HTTPMetrics holds the day-one metric set committed in ADR-0003 plus a
-// private *prometheus.Registry so two HTTPMetrics in one process never
-// collide on the global DefaultRegisterer.
+// HTTPMetrics holds the day-one metric set committed in ADR-0003 plus
+// the v0.0.4 lifecycle counters that operators page on. Private
+// *prometheus.Registry so two HTTPMetrics in one process never collide
+// on the global DefaultRegisterer.
 type HTTPMetrics struct {
 	reg      *prometheus.Registry
 	requests *prometheus.CounterVec
 	duration *prometheus.HistogramVec
-	handler  http.Handler
+	// Lifecycle counters per ROADMAP Iteration 4 §Observability.
+	uploads     *prometheus.CounterVec
+	promotions  *prometheus.CounterVec
+	rollbacks   *prometheus.CounterVec
+	deploys     *prometheus.CounterVec
+	deployDur   *prometheus.HistogramVec
+	stateDrift  *prometheus.CounterVec
+	handler     http.Handler
 }
 
 // New constructs a HTTPMetrics with the registry_http_* family
@@ -51,13 +59,100 @@ func New() *HTTPMetrics {
 		},
 		[]string{"method", "path"},
 	)
-	reg.MustRegister(requests, duration)
+	uploads := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "registry_uploads_total",
+			Help: "Total /upload calls, labelled by outcome (ok|invalid|too_large|substrate_error).",
+		},
+		[]string{"outcome"},
+	)
+	promotions := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "registry_promotions_total",
+			Help: "Total /promote calls, labelled by env / role / outcome (ok|partial|failed|hash_unknown|deprecated|invalid_env).",
+		},
+		[]string{"env", "role", "outcome"},
+	)
+	rollbacks := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "registry_rollbacks_total",
+			Help: "Total /rollback calls, labelled by env / outcome (ok|partial|failed|no_history|race_detected).",
+		},
+		[]string{"env", "outcome"},
+	)
+	deploys := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "registry_deploys_total",
+			Help: "Total instance deploys executed by the rolling deployer, labelled by outcome (deployed|failed|skipped).",
+		},
+		[]string{"outcome"},
+	)
+	deployDur := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "registry_deploy_duration_seconds",
+			Help:    "Per-deploy wall-clock duration in seconds (one observation per /promote or /rollback call, across all instances).",
+			Buckets: deployBuckets,
+		},
+		[]string{},
+	)
+	stateDrift := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "registry_state_drift_total",
+			Help: "Total race-detected divergences between preview-state and committed-state during /rollback, labelled by env.",
+		},
+		[]string{"env"},
+	)
+	reg.MustRegister(requests, duration, uploads, promotions, rollbacks, deploys, deployDur, stateDrift)
 	return &HTTPMetrics{
-		reg:      reg,
-		requests: requests,
-		duration: duration,
-		handler:  promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
+		reg:        reg,
+		requests:   requests,
+		duration:   duration,
+		uploads:    uploads,
+		promotions: promotions,
+		rollbacks:  rollbacks,
+		deploys:    deploys,
+		deployDur:  deployDur,
+		stateDrift: stateDrift,
+		handler:    promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
 	}
+}
+
+// deployBuckets covers the per-instance push window: sub-second
+// /admin/reload + a /readyz poll that may stall up to 10 s.
+var deployBuckets = []float64{
+	0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60,
+}
+
+// RecordUpload ticks the upload outcome counter.
+func (m *HTTPMetrics) RecordUpload(outcome string) {
+	m.uploads.WithLabelValues(outcome).Inc()
+}
+
+// RecordPromotion ticks the promotion outcome counter.
+func (m *HTTPMetrics) RecordPromotion(env, role, outcome string) {
+	m.promotions.WithLabelValues(env, role, outcome).Inc()
+}
+
+// RecordRollback ticks the rollback outcome counter.
+func (m *HTTPMetrics) RecordRollback(env, outcome string) {
+	m.rollbacks.WithLabelValues(env, outcome).Inc()
+}
+
+// RecordDeploy ticks the per-instance deploy counter once per
+// instance result returned by the rolling deployer.
+func (m *HTTPMetrics) RecordDeploy(outcome string) {
+	m.deploys.WithLabelValues(outcome).Inc()
+}
+
+// ObserveDeployDuration records the wall-clock duration of one
+// /promote or /rollback's deploy phase.
+func (m *HTTPMetrics) ObserveDeployDuration(d time.Duration) {
+	m.deployDur.WithLabelValues().Observe(d.Seconds())
+}
+
+// RecordStateDrift ticks the race-detected divergence counter.
+func (m *HTTPMetrics) RecordStateDrift(env string) {
+	m.stateDrift.WithLabelValues(env).Inc()
 }
 
 // RecordRequest increments the per-request counter and records the

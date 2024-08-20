@@ -63,6 +63,38 @@ func TestSeparateInstancesDoNotShareState(t *testing.T) {
 	}
 }
 
+func TestLifecycleCountersTickAndExpose(t *testing.T) {
+	m := prom.New()
+	m.RecordUpload("ok")
+	m.RecordUpload("ok")
+	m.RecordUpload("too_large")
+	m.RecordPromotion("production", "champion", "ok")
+	m.RecordPromotion("production", "champion", "partial")
+	m.RecordRollback("production", "ok")
+	m.RecordDeploy("deployed")
+	m.RecordDeploy("deployed")
+	m.RecordDeploy("failed")
+	m.ObserveDeployDuration(120 * time.Millisecond)
+	m.RecordStateDrift("production")
+
+	out := exposition(t, m)
+	for _, line := range []string{
+		`registry_uploads_total{outcome="ok"} 2`,
+		`registry_uploads_total{outcome="too_large"} 1`,
+		`registry_promotions_total{env="production",outcome="ok",role="champion"} 1`,
+		`registry_promotions_total{env="production",outcome="partial",role="champion"} 1`,
+		`registry_rollbacks_total{env="production",outcome="ok"} 1`,
+		`registry_deploys_total{outcome="deployed"} 2`,
+		`registry_deploys_total{outcome="failed"} 1`,
+		`registry_deploy_duration_seconds_count 1`,
+		`registry_state_drift_total{env="production"} 1`,
+	} {
+		if !strings.Contains(out, line) {
+			t.Fatalf("expected line %q in exposition\n%s", line, out)
+		}
+	}
+}
+
 func exposition(t *testing.T, m *prom.HTTPMetrics) string {
 	t.Helper()
 	rec := httptest.NewRecorder()

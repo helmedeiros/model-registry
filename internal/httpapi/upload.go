@@ -40,6 +40,7 @@ type UploadDeps struct {
 	Logger    AccessSink
 	Now       func() time.Time
 	MaxBytes  int64
+	Metrics   UploadMetrics
 }
 
 // Upload returns the POST /upload handler. Parses multipart/form-data
@@ -64,6 +65,9 @@ func Upload(deps UploadDeps) http.Handler {
 	if deps.MaxBytes <= 0 {
 		deps.MaxBytes = DefaultMaxUploadBytes
 	}
+	if deps.Metrics == nil {
+		deps.Metrics = noopMetrics{}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -72,19 +76,23 @@ func Upload(deps UploadDeps) http.Handler {
 		}
 		if err := r.ParseMultipartForm(deps.MaxBytes); err != nil {
 			if errors.Is(err, multipart.ErrMessageTooLarge) {
+				deps.Metrics.RecordUpload("too_large")
 				writeError(w, http.StatusRequestEntityTooLarge, "upload_too_large")
 				return
 			}
+			deps.Metrics.RecordUpload("invalid")
 			writeError(w, http.StatusBadRequest, "invalid_multipart")
 			return
 		}
 
 		parts, err := readUploadParts(r, deps.MaxBytes)
 		if errors.Is(err, errUploadTooLarge) {
+			deps.Metrics.RecordUpload("too_large")
 			writeError(w, http.StatusRequestEntityTooLarge, "upload_too_large")
 			return
 		}
 		if err != nil {
+			deps.Metrics.RecordUpload("invalid")
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -97,12 +105,14 @@ func Upload(deps UploadDeps) http.Handler {
 			Metadata:      parts.metadata,
 		})
 		if err != nil {
+			deps.Metrics.RecordUpload("substrate_error")
 			writeError(w, http.StatusInternalServerError, "put_failed")
 			return
 		}
 
 		bundle, err := deps.Substrate.GetBundle(r.Context(), hash)
 		if err != nil {
+			deps.Metrics.RecordUpload("substrate_error")
 			writeError(w, http.StatusInternalServerError, "bundle_lookup_failed")
 			return
 		}
@@ -121,6 +131,7 @@ func Upload(deps UploadDeps) http.Handler {
 			})
 		}
 
+		deps.Metrics.RecordUpload("ok")
 		writeJSON(w, http.StatusOK, UploadResponse{
 			Hash:     string(hash),
 			State:    string(bundle.State),

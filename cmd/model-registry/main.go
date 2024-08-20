@@ -114,6 +114,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		Audit:     auditLog,
 		ULID:      idgen,
 		Logger:    logger,
+		Metrics:   metrics,
 	}
 	deps := httpapi.Deps{
 		AccessLog: logger,
@@ -127,6 +128,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		Upload:    &uploadDeps,
 	}
 	if promoteDeps, err := buildPromoteDeps(cfg, st, envState, auditLog, idgen, logger); err == nil {
+		promoteDeps.Metrics = metrics
 		deps.Promote = promoteDeps
 		deps.Rollback = &httpapi.RollbackDeps{
 			Artifacts: promoteDeps.Artifacts,
@@ -136,6 +138,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 			Deployer:  promoteDeps.Deployer,
 			ULID:      promoteDeps.ULID,
 			Logger:    promoteDeps.Logger,
+			Metrics:   metrics,
 		}
 	} else {
 		logger.Info("registry.promote.disabled", map[string]any{"reason": err.Error()})

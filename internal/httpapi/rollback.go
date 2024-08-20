@@ -27,12 +27,16 @@ type RollbackDeps struct {
 	ULID      ULIDSource
 	Logger    AccessSink
 	Now       func() time.Time
+	Metrics   RollbackMetrics
 }
 
 // Rollback returns the POST /rollback handler per ADR-0005.
 func Rollback(deps RollbackDeps) http.Handler {
 	if deps.Now == nil {
 		deps.Now = time.Now
+	}
+	if deps.Metrics == nil {
+		deps.Metrics = noopMetrics{}
 	}
 	for _, c := range []struct {
 		ok   bool
@@ -59,20 +63,24 @@ func Rollback(deps RollbackDeps) http.Handler {
 
 		var req RollbackRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			deps.Metrics.RecordRollback("", "invalid")
 			writeError(w, http.StatusBadRequest, "invalid_body")
 			return
 		}
 		switch {
 		case req.Env == "":
+			deps.Metrics.RecordRollback("", "invalid_env")
 			writeError(w, http.StatusBadRequest, "invalid_env")
 			return
 		case req.Operator == "":
+			deps.Metrics.RecordRollback(req.Env, "invalid_operator")
 			writeError(w, http.StatusBadRequest, "invalid_operator")
 			return
 		case req.Reason == "":
 			// Reason is mandatory on rollback — the audit trail's value
 			// comes from operators having to articulate WHY they
 			// reverted, even at 3am.
+			deps.Metrics.RecordRollback(req.Env, "reason_required")
 			writeError(w, http.StatusBadRequest, "reason_required")
 			return
 		}
@@ -81,47 +89,60 @@ func Rollback(deps RollbackDeps) http.Handler {
 
 		preview, err := deps.EnvState.PreviousChampion(ctx, req.Env)
 		if errors.Is(err, envstate.ErrNoChampion) || errors.Is(err, envstate.ErrNoPreviousChampion) {
+			deps.Metrics.RecordRollback(req.Env, "no_history")
 			writeError(w, http.StatusBadRequest, "no_history")
 			return
 		}
 		if err != nil {
+			deps.Metrics.RecordRollback(req.Env, "preview_error")
 			writeError(w, http.StatusInternalServerError, "preview_failed")
 			return
 		}
 
 		bundle, err := deps.Artifacts.GetBundle(ctx, preview)
 		if err != nil {
+			deps.Metrics.RecordRollback(req.Env, "substrate_error")
 			writeError(w, http.StatusInternalServerError, "bundle_lookup_failed")
 			return
 		}
 		if bundle.State == store.StateDeprecated {
+			deps.Metrics.RecordRollback(req.Env, "hash_deprecated")
 			writeError(w, http.StatusBadRequest, "hash_deprecated")
 			return
 		}
 
 		sourceBytes, contentType, err := deps.Artifacts.GetMember(ctx, preview, store.MemberSource)
 		if err != nil {
+			deps.Metrics.RecordRollback(req.Env, "substrate_error")
 			writeError(w, http.StatusInternalServerError, "member_fetch_failed")
 			return
 		}
 
 		targets, err := deps.Discovery.Instances(ctx, req.Env)
 		if errors.Is(err, instances.ErrNoInstances) {
+			deps.Metrics.RecordRollback(req.Env, "invalid_env")
 			writeError(w, http.StatusBadRequest, "invalid_env")
 			return
 		}
 		if err != nil {
+			deps.Metrics.RecordRollback(req.Env, "discovery_error")
 			writeError(w, http.StatusInternalServerError, "discovery_failed")
 			return
 		}
 
+		deployStart := deps.Now()
 		deployResult, err := deps.Deployer.Deploy(ctx, targets, deployer.Body{
 			ContentType: string(contentType),
 			Bytes:       sourceBytes,
 		})
 		if err != nil {
+			deps.Metrics.RecordRollback(req.Env, "deploy_error")
 			writeError(w, http.StatusInternalServerError, "deploy_failed")
 			return
+		}
+		deps.Metrics.ObserveDeployDuration(deps.Now().Sub(deployStart))
+		for _, ir := range deployResult.Instances {
+			deps.Metrics.RecordDeploy(string(ir.Status))
 		}
 		view := deployView(deployResult)
 
@@ -129,6 +150,7 @@ func Rollback(deps RollbackDeps) http.Handler {
 		previousHash := roleHashOrEmpty(previousState.Champion)
 
 		if deployResult.Outcome == deployer.OutcomeFailed {
+			deps.Metrics.RecordRollback(req.Env, "failed")
 			writeJSON(w, http.StatusBadGateway, RollbackResponse{
 				Env:          req.Env,
 				PreviousHash: previousHash,
@@ -140,6 +162,7 @@ func Rollback(deps RollbackDeps) http.Handler {
 
 		rolledTo, err := deps.EnvState.RollbackChampion(ctx, req.Env, req.Operator, req.Reason)
 		if err != nil {
+			deps.Metrics.RecordRollback(req.Env, "envstate_error")
 			writeError(w, http.StatusInternalServerError, "envstate_failed")
 			return
 		}
@@ -150,6 +173,7 @@ func Rollback(deps RollbackDeps) http.Handler {
 		// state says rolledTo. Log the divergence so the operator can
 		// reconcile via a follow-up rollback.
 		if rolledTo != preview {
+			deps.Metrics.RecordStateDrift(req.Env)
 			deps.Logger.Info("registry.rollback.race_detected", map[string]any{
 				"env":            req.Env,
 				"preview_hash":   string(preview),
@@ -170,6 +194,9 @@ func Rollback(deps RollbackDeps) http.Handler {
 
 		if deployResult.Outcome == deployer.OutcomePartial {
 			w.Header().Set("X-Partial-Deploy", "true")
+			deps.Metrics.RecordRollback(req.Env, "partial")
+		} else {
+			deps.Metrics.RecordRollback(req.Env, "ok")
 		}
 		writeJSON(w, http.StatusOK, RollbackResponse{
 			Env:          req.Env,
