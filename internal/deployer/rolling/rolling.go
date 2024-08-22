@@ -14,11 +14,19 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
+	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/helmedeiros/model-registry/internal/deployer"
 	"github.com/helmedeiros/model-registry/internal/instances"
 )
+
+// tracerName is the OTel Tracer name the rolling deployer registers
+// against the global TracerProvider. Operators see spans whose
+// instrumentation scope is this string in Jaeger.
+const tracerName = "github.com/helmedeiros/model-registry/internal/deployer/rolling"
 
 // ErrReadyzTimeout is returned by Deploy's per-instance result when
 // the readyz poll did not see a 200 inside the configured per-instance
@@ -82,11 +90,23 @@ func (d *Deployer) Deploy(ctx context.Context, targets []instances.Instance, bod
 }
 
 func (d *Deployer) deployOne(ctx context.Context, target instances.Instance, body deployer.Body) deployer.InstanceResult {
+	tracer := otel.Tracer(tracerName)
+	ctx, span := tracer.Start(ctx, "registry.deploy.push_to_instance",
+		oteltrace.WithSpanKind(oteltrace.SpanKindClient),
+		oteltrace.WithAttributes(
+			attribute.String("instance.url", target.URL),
+			attribute.String("instance.env", target.Env),
+		),
+	)
+	defer span.End()
+
 	start := time.Now()
 	deployCtx, cancel := context.WithTimeout(ctx, d.instanceTimeout)
 	defer cancel()
 
 	if err := d.postReload(deployCtx, target, body); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "post_reload failed")
 		return deployer.InstanceResult{
 			URL:      target.URL,
 			Status:   deployer.StatusFailed,
@@ -95,6 +115,8 @@ func (d *Deployer) deployOne(ctx context.Context, target instances.Instance, bod
 		}
 	}
 	if err := d.waitReadyz(deployCtx, target); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "readyz failed")
 		return deployer.InstanceResult{
 			URL:      target.URL,
 			Status:   deployer.StatusFailed,
@@ -102,6 +124,7 @@ func (d *Deployer) deployOne(ctx context.Context, target instances.Instance, bod
 			Error:    err.Error(),
 		}
 	}
+	span.SetAttributes(attribute.Float64("deploy.duration_ms", float64(time.Since(start).Milliseconds())))
 	return deployer.InstanceResult{
 		URL:      target.URL,
 		Status:   deployer.StatusDeployed,
@@ -130,27 +153,43 @@ func (d *Deployer) postReload(ctx context.Context, target instances.Instance, bo
 }
 
 func (d *Deployer) waitReadyz(ctx context.Context, target instances.Instance) error {
+	tracer := otel.Tracer(tracerName)
+	ctx, span := tracer.Start(ctx, "registry.deploy.readyz",
+		oteltrace.WithSpanKind(oteltrace.SpanKindClient),
+		oteltrace.WithAttributes(attribute.String("instance.url", target.URL)),
+	)
+	defer span.End()
+
 	prop := otel.GetTextMapPropagator()
 	ticker := time.NewTicker(d.readyzInterval)
 	defer ticker.Stop()
+	polls := 0
 	for {
 		if err := ctx.Err(); err != nil {
+			span.SetAttributes(attribute.Int("readyz.polls", polls))
+			span.SetStatus(codes.Error, "readyz timeout")
 			return fmt.Errorf("waitReadyz: %w", ErrReadyzTimeout)
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL+"/readyz", nil)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "build request")
 			return fmt.Errorf("build readyz request: %w", err)
 		}
 		prop.Inject(ctx, propagation.HeaderCarrier(req.Header))
+		polls++
 		resp, err := d.client.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
+				span.SetAttributes(attribute.Int("readyz.polls", polls))
 				return nil
 			}
 		}
 		select {
 		case <-ctx.Done():
+			span.SetAttributes(attribute.Int("readyz.polls", polls))
+			span.SetStatus(codes.Error, "readyz timeout")
 			return fmt.Errorf("waitReadyz: %w", ErrReadyzTimeout)
 		case <-ticker.C:
 		}

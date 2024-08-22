@@ -141,14 +141,18 @@ func (deps PromoteDeps) runChampionPromote(ctx context.Context, w http.ResponseW
 		return
 	}
 
-	previousHash, err := deps.EnvState.PromoteChampion(ctx, req.Env, hash, req.Operator, req.Reason)
+	commitCtx, commitSpan := startChildSpan(ctx, "registry.champion.commit_state")
+	previousHash, err := deps.EnvState.PromoteChampion(commitCtx, req.Env, hash, req.Operator, req.Reason)
+	commitSpan.End()
 	if err != nil {
 		deps.Metrics.RecordPromotion(req.Env, req.Role, "envstate_error")
 		writeError(w, http.StatusInternalServerError, "envstate_failed")
 		return
 	}
 
-	if err := deps.recordPromote(ctx, req, hash); err != nil {
+	auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
+	if err := deps.recordPromote(auditCtx, req, hash); err != nil {
+		auditSpan.RecordError(err)
 		deps.Logger.Info("registry.audit.write_failed", map[string]any{
 			"action":        "promote",
 			"env":           req.Env,
@@ -157,6 +161,7 @@ func (deps PromoteDeps) runChampionPromote(ctx context.Context, w http.ResponseW
 			"error":         err.Error(),
 		})
 	}
+	auditSpan.End()
 
 	if deployResult.Outcome == deployer.OutcomePartial {
 		w.Header().Set("X-Partial-Deploy", "true")

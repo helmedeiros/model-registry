@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"time"
 
 	otelapi "go.opentelemetry.io/otel"
@@ -140,6 +142,56 @@ func TestDeployInjectsTraceparent(t *testing.T) {
 	}
 	if !sawTraceparent.Load() {
 		t.Fatal("traceparent header never reached the server")
+	}
+}
+
+// TestDeployEmitsPushAndReadyzChildSpans asserts every successful
+// instance deploy records the registry.deploy.push_to_instance +
+// registry.deploy.readyz spans under the caller's trace so operators
+// can see per-instance + per-phase decomposition in Jaeger.
+func TestDeployEmitsPushAndReadyzChildSpans(t *testing.T) {
+	prev := otelapi.GetTextMapPropagator()
+	otelapi.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otelapi.SetTextMapPropagator(prev) })
+
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	prevTP := otelapi.GetTracerProvider()
+	otelapi.SetTracerProvider(tp)
+	t.Cleanup(func() { otelapi.SetTracerProvider(prevTP) })
+
+	srv := newMarkupSvcStub(t, alwaysReady)
+	defer srv.Close()
+	d := rolling.New(rolling.WithHTTPClient(srv.Client()), rolling.WithReadyzInterval(time.Millisecond))
+
+	ctx, parent := tp.Tracer("rolling-test").Start(context.Background(), "operator.promote")
+	defer parent.End()
+
+	_, err := d.Deploy(ctx, []instances.Instance{
+		{URL: srv.URL, Env: "production"},
+		{URL: srv.URL, Env: "production"},
+	}, deployer.Body{ContentType: "text/csv", Bytes: []byte("x")})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	parent.End()
+	wantTrace := parent.SpanContext().TraceID().String()
+	pushCount, readyzCount := 0, 0
+	for _, s := range rec.Ended() {
+		if s.SpanContext().TraceID().String() != wantTrace {
+			continue
+		}
+		switch s.Name() {
+		case "registry.deploy.push_to_instance":
+			pushCount++
+		case "registry.deploy.readyz":
+			readyzCount++
+		}
+	}
+	if pushCount != 2 || readyzCount != 2 {
+		t.Fatalf("spans: push=%d readyz=%d want both 2 (one per instance)", pushCount, readyzCount)
 	}
 }
 

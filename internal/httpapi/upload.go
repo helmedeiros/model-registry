@@ -117,12 +117,14 @@ func Upload(deps UploadDeps) http.Handler {
 			return
 		}
 
-		if err := recordUpload(r.Context(), deps, hash, parts.operator); err != nil {
+		auditCtx, auditSpan := startChildSpan(r.Context(), "registry.audit.record")
+		if err := recordUpload(auditCtx, deps, hash, parts.operator); err != nil {
 			// Put already committed; returning 500 would mislead the
 			// caller into thinking the upload did not land. Log the
 			// audit gap as a structured event so the observability
 			// surface can alarm on it, then continue with the success
 			// envelope.
+			auditSpan.RecordError(err)
 			deps.Logger.Info("registry.audit.write_failed", map[string]any{
 				"action":        "upload",
 				"artifact_hash": string(hash),
@@ -130,6 +132,7 @@ func Upload(deps UploadDeps) http.Handler {
 				"error":         err.Error(),
 			})
 		}
+		auditSpan.End()
 
 		deps.Metrics.RecordUpload("ok")
 		writeJSON(w, http.StatusOK, UploadResponse{

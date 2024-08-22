@@ -160,7 +160,9 @@ func Rollback(deps RollbackDeps) http.Handler {
 			return
 		}
 
-		rolledTo, err := deps.EnvState.RollbackChampion(ctx, req.Env, req.Operator, req.Reason)
+		commitCtx, commitSpan := startChildSpan(ctx, "registry.champion.commit_state")
+		rolledTo, err := deps.EnvState.RollbackChampion(commitCtx, req.Env, req.Operator, req.Reason)
+		commitSpan.End()
 		if err != nil {
 			deps.Metrics.RecordRollback(req.Env, "envstate_error")
 			writeError(w, http.StatusInternalServerError, "envstate_failed")
@@ -182,7 +184,9 @@ func Rollback(deps RollbackDeps) http.Handler {
 			})
 		}
 
-		if err := deps.recordRollback(ctx, req, rolledTo); err != nil {
+		auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
+		if err := deps.recordRollback(auditCtx, req, rolledTo); err != nil {
+			auditSpan.RecordError(err)
 			deps.Logger.Info("registry.audit.write_failed", map[string]any{
 				"action":        "rollback",
 				"env":           req.Env,
@@ -191,6 +195,7 @@ func Rollback(deps RollbackDeps) http.Handler {
 				"error":         err.Error(),
 			})
 		}
+		auditSpan.End()
 
 		if deployResult.Outcome == deployer.OutcomePartial {
 			w.Header().Set("X-Partial-Deploy", "true")
