@@ -153,7 +153,7 @@ func (deps PromoteDeps) runChampionPromote(ctx context.Context, w http.ResponseW
 	auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
 	if err := deps.recordPromote(auditCtx, req, hash); err != nil {
 		auditSpan.RecordError(err)
-		deps.Logger.Info("registry.audit.write_failed", map[string]any{
+		logInfoWithTrace(deps.Logger, auditCtx, "registry.audit.write_failed", map[string]any{
 			"action":        "promote",
 			"env":           req.Env,
 			"artifact_hash": req.Hash,

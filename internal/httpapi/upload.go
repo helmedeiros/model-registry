@@ -125,7 +125,7 @@ func Upload(deps UploadDeps) http.Handler {
 			// surface can alarm on it, then continue with the success
 			// envelope.
 			auditSpan.RecordError(err)
-			deps.Logger.Info("registry.audit.write_failed", map[string]any{
+			logInfoWithTrace(deps.Logger, auditCtx, "registry.audit.write_failed", map[string]any{
 				"action":        "upload",
 				"artifact_hash": string(hash),
 				"operator":      parts.operator,

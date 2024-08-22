@@ -176,7 +176,7 @@ func Rollback(deps RollbackDeps) http.Handler {
 		// reconcile via a follow-up rollback.
 		if rolledTo != preview {
 			deps.Metrics.RecordStateDrift(req.Env)
-			deps.Logger.Info("registry.rollback.race_detected", map[string]any{
+			logInfoWithTrace(deps.Logger, ctx, "registry.rollback.race_detected", map[string]any{
 				"env":            req.Env,
 				"preview_hash":   string(preview),
 				"committed_hash": string(rolledTo),
@@ -187,7 +187,7 @@ func Rollback(deps RollbackDeps) http.Handler {
 		auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
 		if err := deps.recordRollback(auditCtx, req, rolledTo); err != nil {
 			auditSpan.RecordError(err)
-			deps.Logger.Info("registry.audit.write_failed", map[string]any{
+			logInfoWithTrace(deps.Logger, auditCtx, "registry.audit.write_failed", map[string]any{
 				"action":        "rollback",
 				"env":           req.Env,
 				"artifact_hash": string(rolledTo),
