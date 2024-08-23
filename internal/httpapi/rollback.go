@@ -225,5 +225,6 @@ func (deps RollbackDeps) recordRollback(ctx context.Context, req RollbackRequest
 		ArtifactHash: rolledTo,
 		Reason:       req.Reason,
 		At:           deps.Now(),
+		TraceID:      traceIDFromCtx(ctx),
 	})
 }

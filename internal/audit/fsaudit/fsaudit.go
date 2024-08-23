@@ -37,6 +37,10 @@ func New(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := addTraceIDColumn(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
@@ -67,11 +71,31 @@ CREATE TABLE IF NOT EXISTS audit_entry (
     target        TEXT NOT NULL,
     artifact_hash TEXT,
     reason        TEXT,
-    at            INTEGER NOT NULL
+    at            INTEGER NOT NULL,
+    trace_id      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_entry_recent ON audit_entry(at DESC, id DESC);
+
+-- forward-compatible ALTER for an existing file written before the
+-- trace_id column was introduced. SQLite ignores the duplicate-column
+-- error when the column already exists, so we tolerate it.
 `
+
+// addTraceIDColumn is run after applySchema to bring older audit.db
+// files up to the current schema. Idempotent: if trace_id already
+// exists the ALTER errors with "duplicate column name", which we
+// swallow.
+func addTraceIDColumn(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE audit_entry ADD COLUMN trace_id TEXT`)
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "duplicate column name") {
+		return nil
+	}
+	return fmt.Errorf("fsaudit: add trace_id column: %w", err)
+}
 
 // List implements audit.Reader.
 func (s *Store) List(ctx context.Context, opts audit.ListOptions) (audit.Page, error) {
@@ -101,12 +125,12 @@ func (s *Store) List(ctx context.Context, opts audit.ListOptions) (audit.Page, e
 	}
 	if !useCursor {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, operator, action, target, artifact_hash, reason, at
+			`SELECT id, operator, action, target, artifact_hash, reason, at, trace_id
 			   FROM audit_entry`+orderClause,
 			limit+1)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, operator, action, target, artifact_hash, reason, at
+			`SELECT id, operator, action, target, artifact_hash, reason, at, trace_id
 			   FROM audit_entry
 			  WHERE (at < ? OR (at = ? AND id < ?))`+orderClause,
 			cAt, cAt, cID, limit+1)
@@ -121,9 +145,10 @@ func (s *Store) List(ctx context.Context, opts audit.ListOptions) (audit.Page, e
 		var (
 			id, operator, action, target sql.NullString
 			artifactHash, reason         sql.NullString
+			traceID                      sql.NullString
 			at                           int64
 		)
-		if err := rows.Scan(&id, &operator, &action, &target, &artifactHash, &reason, &at); err != nil {
+		if err := rows.Scan(&id, &operator, &action, &target, &artifactHash, &reason, &at, &traceID); err != nil {
 			return audit.Page{}, fmt.Errorf("fsaudit: list scan: %w", err)
 		}
 		items = append(items, audit.Entry{
@@ -134,6 +159,7 @@ func (s *Store) List(ctx context.Context, opts audit.ListOptions) (audit.Page, e
 			ArtifactHash: store.Hash(artifactHash.String),
 			Reason:       reason.String,
 			At:           time.UnixMilli(at).UTC(),
+			TraceID:      traceID.String,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -182,11 +208,12 @@ func (s *Store) Record(ctx context.Context, entry audit.Entry) error {
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO audit_entry(id, operator, action, target, artifact_hash, reason, at)
-		      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_entry(id, operator, action, target, artifact_hash, reason, at, trace_id)
+		      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.Operator, entry.Action, entry.Target,
 		nullableString(string(entry.ArtifactHash)), nullableString(entry.Reason),
 		entry.At.UnixMilli(),
+		nullableString(entry.TraceID),
 	)
 	if isUniqueConstraintErr(err) {
 		return audit.ErrDuplicateID

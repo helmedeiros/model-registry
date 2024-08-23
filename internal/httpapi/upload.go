@@ -249,5 +249,6 @@ func recordUpload(ctx context.Context, deps UploadDeps, hash store.Hash, operato
 		Target:       "artifacts/" + string(hash),
 		ArtifactHash: hash,
 		At:           deps.Now(),
+		TraceID:      traceIDFromCtx(ctx),
 	})
 }

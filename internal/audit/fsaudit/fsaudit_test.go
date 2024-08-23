@@ -21,12 +21,13 @@ func TestConformance(t *testing.T) {
 		seed := func(entries []audit.Entry) {
 			for _, e := range entries {
 				if _, err := s.db.Exec(
-					`INSERT INTO audit_entry(id, operator, action, target, artifact_hash, reason, at)
-					      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+					`INSERT INTO audit_entry(id, operator, action, target, artifact_hash, reason, at, trace_id)
+					      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 					e.ID, e.Operator, e.Action, e.Target,
 					nullableString(string(e.ArtifactHash)),
 					nullableString(e.Reason),
 					e.At.UnixMilli(),
+					nullableString(e.TraceID),
 				); err != nil {
 					t.Fatalf("seed audit_entry: %v", err)
 				}

@@ -197,6 +197,7 @@ func (deps PromoteDeps) recordPromote(ctx context.Context, req PromoteRequest, h
 		ArtifactHash: hash,
 		Reason:       req.Reason,
 		At:           deps.Now(),
+		TraceID:      traceIDFromCtx(ctx),
 	})
 }
 

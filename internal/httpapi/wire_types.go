@@ -80,6 +80,10 @@ type AuditEntryView struct {
 	ArtifactHash string `json:"artifact_hash,omitempty"`
 	Reason       string `json:"reason,omitempty"`
 	At           string `json:"at"`
+	// TraceID is the W3C trace id of the request that drove the action.
+	// Operators paste this into Jaeger to reach the waterfall. Blank when
+	// the entry was recorded outside a trace context.
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 type AuditPage struct {

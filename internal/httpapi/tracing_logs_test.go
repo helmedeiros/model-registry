@@ -62,6 +62,47 @@ func mustReadAll(r io.Reader) []byte {
 	return b
 }
 
+// TestAuditEntryCarriesTraceID drives a /promote and asserts the
+// recorded audit.Entry's TraceID equals the parent trace's TraceID.
+// Without this, the /audit endpoint and the Jaeger UI are two
+// disjoint surfaces — operators can read who promoted what, or look
+// at a trace, but cannot hop from one to the other.
+func TestAuditEntryCarriesTraceID(t *testing.T) {
+	tp := sdktrace.NewTracerProvider()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	deps, st, _, au, _ := newPromoteDeps(t, okResult("http://markup-svc-1:8080"))
+	h := putRule(t, st, []byte("alpha,rule,1.0,1\n"))
+
+	ctx, span := tp.Tracer("operator").Start(context.Background(), "operator.promote")
+	defer span.End()
+
+	body := promoteBody(t, httpapi.PromoteRequest{
+		Hash: string(h), Env: "production", Role: "champion", Operator: "alice", Reason: "trace-test",
+	})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/promote", body).WithContext(ctx)
+	httpapi.Promote(deps).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("/promote: %d %s", rr.Code, rr.Body.String())
+	}
+
+	page, err := au.List(context.Background(), audit.ListOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("audit entries=%d want 1", len(page.Items))
+	}
+	want := span.SpanContext().TraceID().String()
+	if got := page.Items[0].TraceID; got != want {
+		t.Fatalf("audit TraceID=%q want %q", got, want)
+	}
+}
+
 func TestHandlerLogEventsCarryTraceID(t *testing.T) {
 	tp := sdktrace.NewTracerProvider()
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })

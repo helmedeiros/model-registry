@@ -17,6 +17,9 @@ import (
 // ULID (lexicographically sortable, monotonic per-time-bucket); the
 // memaudit + future fsaudit sort tiebreakers depend on this so a
 // non-ULID seeded entry would silently corrupt newest-first order.
+// TraceID is the W3C trace id of the request that drove the action,
+// blank when the action was minted without a trace context. Operators
+// hop from "who did this?" in /audit to the matching Jaeger waterfall.
 type Entry struct {
 	ID           string
 	Operator     string
@@ -25,6 +28,7 @@ type Entry struct {
 	ArtifactHash store.Hash
 	Reason       string
 	At           time.Time
+	TraceID      string
 }
 
 // ListOptions paginate audit queries. The shape is intentionally

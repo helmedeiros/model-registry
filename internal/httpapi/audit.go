@@ -65,6 +65,7 @@ func toAuditPage(p audit.Page) AuditPage {
 			ArtifactHash: string(e.ArtifactHash),
 			Reason:       e.Reason,
 			At:           e.At.UTC().Format(time.RFC3339Nano),
+			TraceID:      e.TraceID,
 		})
 	}
 	return out
