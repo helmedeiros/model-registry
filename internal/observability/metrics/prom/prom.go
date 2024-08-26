@@ -3,11 +3,14 @@
 package prom
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // httpBuckets covers the latency range model-registry endpoints span:
@@ -113,7 +116,10 @@ func New() *HTTPMetrics {
 		deploys:    deploys,
 		deployDur:  deployDur,
 		stateDrift: stateDrift,
-		handler:    promhttp.HandlerFor(reg, promhttp.HandlerOpts{}),
+		// EnableOpenMetrics carries exemplar lines through the /metrics
+		// exposition so a Grafana panel can drill from a histogram bar
+		// to the Jaeger trace whose id is on the exemplar.
+		handler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{EnableOpenMetrics: true}),
 	}
 }
 
@@ -145,9 +151,27 @@ func (m *HTTPMetrics) RecordDeploy(outcome string) {
 }
 
 // ObserveDeployDuration records the wall-clock duration of one
-// /promote or /rollback's deploy phase.
-func (m *HTTPMetrics) ObserveDeployDuration(d time.Duration) {
-	m.deployDur.WithLabelValues().Observe(d.Seconds())
+// /promote or /rollback's deploy phase. When ctx carries a valid
+// span context, the duration is recorded as an exemplar labelled
+// with the trace_id so Grafana drills from a slow-bucket bar to
+// the Jaeger waterfall that produced it.
+func (m *HTTPMetrics) ObserveDeployDuration(ctx context.Context, d time.Duration) {
+	obs := m.deployDur.WithLabelValues()
+	if traceID := traceIDFromCtx(ctx); traceID != "" {
+		if ex, ok := obs.(prometheus.ExemplarObserver); ok {
+			ex.ObserveWithExemplar(d.Seconds(), prometheus.Labels{"trace_id": traceID})
+			return
+		}
+	}
+	obs.Observe(d.Seconds())
+}
+
+func traceIDFromCtx(ctx context.Context) string {
+	sc := oteltrace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return ""
+	}
+	return sc.TraceID().String()
 }
 
 // RecordStateDrift ticks the race-detected divergence counter.

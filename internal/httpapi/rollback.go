@@ -140,7 +140,7 @@ func Rollback(deps RollbackDeps) http.Handler {
 			writeError(w, http.StatusInternalServerError, "deploy_failed")
 			return
 		}
-		deps.Metrics.ObserveDeployDuration(deps.Now().Sub(deployStart))
+		deps.Metrics.ObserveDeployDuration(ctx, deps.Now().Sub(deployStart))
 		for _, ir := range deployResult.Instances {
 			deps.Metrics.RecordDeploy(string(ir.Status))
 		}

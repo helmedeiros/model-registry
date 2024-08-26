@@ -121,7 +121,7 @@ func (deps PromoteDeps) runChampionPromote(ctx context.Context, w http.ResponseW
 	// Observe duration + per-instance counts only on a successful
 	// Deploy return — keeps the histogram's count aligned with
 	// registry_deploys_total so a future Grafana rate ratio is honest.
-	deps.Metrics.ObserveDeployDuration(deps.Now().Sub(deployStart))
+	deps.Metrics.ObserveDeployDuration(ctx, deps.Now().Sub(deployStart))
 	for _, ir := range deployResult.Instances {
 		deps.Metrics.RecordDeploy(string(ir.Status))
 	}

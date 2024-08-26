@@ -46,7 +46,7 @@ func (f *fakeLifecycleMetrics) RecordDeploy(outcome string) {
 	defer f.mu.Unlock()
 	f.deploys = append(f.deploys, outcome)
 }
-func (f *fakeLifecycleMetrics) ObserveDeployDuration(d time.Duration) {
+func (f *fakeLifecycleMetrics) ObserveDeployDuration(_ context.Context, d time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deployDuration = append(f.deployDuration, d)

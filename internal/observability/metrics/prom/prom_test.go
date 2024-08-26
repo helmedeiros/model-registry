@@ -1,12 +1,15 @@
 package prom_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/helmedeiros/model-registry/internal/observability/metrics/prom"
 )
@@ -74,7 +77,7 @@ func TestLifecycleCountersTickAndExpose(t *testing.T) {
 	m.RecordDeploy("deployed")
 	m.RecordDeploy("deployed")
 	m.RecordDeploy("failed")
-	m.ObserveDeployDuration(120 * time.Millisecond)
+	m.ObserveDeployDuration(context.Background(), 120*time.Millisecond)
 	m.RecordStateDrift("production")
 
 	out := exposition(t, m)
@@ -92,6 +95,36 @@ func TestLifecycleCountersTickAndExpose(t *testing.T) {
 		if !strings.Contains(out, line) {
 			t.Fatalf("expected line %q in exposition\n%s", line, out)
 		}
+	}
+}
+
+// TestDeployDurationCarriesTraceExemplar drives ObserveDeployDuration
+// with a context carrying a known trace id and asserts the resulting
+// OpenMetrics exposition lists the trace id on the exemplar. Without
+// exemplars a Grafana panel cannot drill from a slow-bucket bar to
+// the Jaeger waterfall that produced it.
+func TestDeployDurationCarriesTraceExemplar(t *testing.T) {
+	m := prom.New()
+
+	tp := sdktrace.NewTracerProvider()
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	ctx, span := tp.Tracer("exemplar-test").Start(context.Background(), "operator.promote")
+	defer span.End()
+
+	m.ObserveDeployDuration(ctx, 250*time.Millisecond)
+
+	// Exemplars only render under the OpenMetrics content type. The
+	// promhttp handler negotiates it via the Accept header.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Accept", "application/openmetrics-text")
+	m.Handler().ServeHTTP(rec, req)
+
+	body, _ := io.ReadAll(rec.Body)
+	out := string(body)
+	wantTrace := span.SpanContext().TraceID().String()
+	if !strings.Contains(out, "# {trace_id=\""+wantTrace+"\"}") {
+		t.Fatalf("exemplar line with trace_id=%q not in exposition:\n%s", wantTrace, out)
 	}
 }
 

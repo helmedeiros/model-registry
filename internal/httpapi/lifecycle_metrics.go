@@ -1,6 +1,9 @@
 package httpapi
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // UploadMetrics is the observability surface POST /upload uses.
 type UploadMetrics interface {
@@ -14,7 +17,7 @@ type UploadMetrics interface {
 type PromoteMetrics interface {
 	RecordPromotion(env, role, outcome string)
 	RecordDeploy(outcome string)
-	ObserveDeployDuration(d time.Duration)
+	ObserveDeployDuration(ctx context.Context, d time.Duration)
 }
 
 // RollbackMetrics is the observability surface POST /rollback uses.
@@ -24,7 +27,7 @@ type PromoteMetrics interface {
 type RollbackMetrics interface {
 	RecordRollback(env, outcome string)
 	RecordDeploy(outcome string)
-	ObserveDeployDuration(d time.Duration)
+	ObserveDeployDuration(ctx context.Context, d time.Duration)
 	RecordStateDrift(env string)
 }
 
@@ -37,5 +40,5 @@ func (noopMetrics) RecordUpload(string)                    {}
 func (noopMetrics) RecordPromotion(string, string, string) {}
 func (noopMetrics) RecordRollback(string, string)          {}
 func (noopMetrics) RecordDeploy(string)                    {}
-func (noopMetrics) ObserveDeployDuration(time.Duration)    {}
+func (noopMetrics) ObserveDeployDuration(context.Context, time.Duration) {}
 func (noopMetrics) RecordStateDrift(string)                {}
