@@ -34,10 +34,12 @@ These are the latest numbers from `make bench-substrate`. Numbers move freely; b
 
 | Benchmark | Measured | Margin under bar |
 |-----------|----------|------------------|
-| `BenchmarkPOST_Upload_SmallArtifact` | 23 µs / op | ~8,700× (handler only; multipart parse + substrate Put at 1 KB) |
-| `BenchmarkPOST_Upload_LargeArtifact` | 1.63 ms / op | ~614× (handler only; multipart parse + substrate Put at 2 MB) |
-| `BenchmarkPOST_Promote_3Replicas` | 21 µs / op | N/A — stub deployer returns instantly. The 60 s bar covers the real rolling-push wall-clock (3 × 10 s per-instance `/readyz` timeout). This bench validates handler dispatch only; the bar is validated by the ADR-0005.x live-stack gate. |
-| `BenchmarkConcurrentOperatorAPI_10Concurrent` | 595 µs p99 | ~840× (10 distinct envs; the WAL-serialised contention shows in the round wall-clock of ~363 µs, comfortably under the analytic "< 10 ms contention" the ADR pre-registered) |
+| `BenchmarkPOST_Upload_SmallArtifact` | 51 µs / op | ~3,900× (handler only; multipart parse + substrate Put at 1 KB) |
+| `BenchmarkPOST_Upload_LargeArtifact` | 2.18 ms / op | ~459× (handler only; multipart parse + substrate Put at 2 MB) |
+| `BenchmarkPOST_Promote_3Replicas` | 55 µs / op | N/A — stub deployer returns instantly. The 60 s bar covers the real rolling-push wall-clock (3 × 10 s per-instance `/readyz` timeout). This bench validates handler dispatch only; the bar is validated by the ADR-0005.x live-stack gate. |
+| `BenchmarkConcurrentOperatorAPI_10Concurrent` | 3.99 ms p99 | ~125× (10 distinct envs; WAL-serialised contention + lifecycle spans dominate the round wall-clock at ~2.14 ms — still under the analytic "< 10 ms contention" the ADR pre-registered) |
+
+**Observability cost**: numbers above are measured AFTER the post-v0.0.4 observability chunks landed (lifecycle child spans + log trace correlation + audit TraceID + deploy-duration exemplar). Each handler call now pays for 2–4 span Start/End cycles + exemplar lookup; the per-call cost roughly doubled vs the pre-observability numbers but every bar still clears with 125–3,900× margin. The biggest relative hit is on the concurrent path (p99 went from 595 µs to 3.99 ms — 6.7×) because the 10 parallel goroutines each pay the new per-span allocation.
 
 The handler bars cover the operator-visible round-trip including the deployer's per-instance push to a real markup-svc. The benches above stub the deployer (the rolling package's own benches measure the per-instance cost) so the measured numbers are handler-only and the margin column for the deploy-bound bars is "N/A". The live-stack E2E for the full round-trip is the ADR-0005.x gate, not a bar in this set.
 

@@ -33,10 +33,13 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
@@ -44,6 +47,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
 	"github.com/helmedeiros/model-registry/internal/instances/static"
+	"github.com/helmedeiros/model-registry/internal/observability/metrics/prom"
 	"github.com/helmedeiros/model-registry/internal/store/memstore"
 	"github.com/helmedeiros/model-registry/internal/ulid"
 )
@@ -96,11 +100,81 @@ func TestE2ELifecycle_RoundTrip(t *testing.T) {
 			t.Fatalf("audit[%d]=%q want %q (full: %v)", i, actions[i], want, actions)
 		}
 	}
+
+	// --- Scientific verification of the observability surface ---
+	assertLifecycleSpansEmitted(t, reg)
+	assertAuditEntriesCarryTraceID(t, reg)
+	assertDeployDurationExemplarsPresent(t, reg)
+}
+
+// assertLifecycleSpansEmitted proves the lifecycle child spans landed
+// for every handler call the round-trip exercised. Without these
+// assertions a future refactor that drops a tracer.Start would
+// silently regress operator visibility in Jaeger.
+func assertLifecycleSpansEmitted(t *testing.T, reg registryHandle) {
+	t.Helper()
+	want := map[string]int{
+		"registry.champion.commit_state":   3, // promote-A + promote-B + rollback
+		"registry.audit.record":            5, // upload-A + upload-B + promote-A + promote-B + rollback
+		"registry.deploy.push_to_instance": 3, // 1 instance × 3 deploys (promote-A + promote-B + rollback)
+		"registry.deploy.readyz":           3, // 1 readyz poll per push
+	}
+	got := map[string]int{}
+	for _, s := range reg.spans.Ended() {
+		got[s.Name()]++
+	}
+	for name, n := range want {
+		if got[name] < n {
+			t.Errorf("span %q count=%d want >=%d", name, got[name], n)
+		}
+	}
+	if t.Failed() {
+		t.Logf("recorded spans: %v", got)
+	}
+}
+
+// assertAuditEntriesCarryTraceID proves every audit row has a
+// non-empty TraceID. The /audit JSON endpoint then carries this
+// through wire_types.AuditEntryView.TraceID so operators hop from
+// the ledger to Jaeger in two clicks.
+func assertAuditEntriesCarryTraceID(t *testing.T, reg registryHandle) {
+	t.Helper()
+	page, err := reg.audit.List(context.Background(), audit.ListOptions{Limit: 100})
+	if err != nil {
+		t.Fatalf("audit.List: %v", err)
+	}
+	for i, e := range page.Items {
+		if e.TraceID == "" {
+			t.Errorf("audit[%d] action=%q has empty TraceID — operator cannot hop to Jaeger", i, e.Action)
+		}
+	}
+}
+
+// assertDeployDurationExemplarsPresent scrapes the /metrics handler
+// with the OpenMetrics Accept header and asserts the
+// registry_deploy_duration_seconds histogram carries trace_id
+// exemplars. Without exemplars Grafana panels cannot drill from a
+// slow-bucket bar to the Jaeger waterfall that produced it.
+func assertDeployDurationExemplarsPresent(t *testing.T, reg registryHandle) {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Accept", "application/openmetrics-text")
+	reg.metrics.Handler().ServeHTTP(rr, req)
+	body, _ := io.ReadAll(rr.Body)
+	out := string(body)
+	// Exemplar line shape: `bucket_le ... # {trace_id="..."} value timestamp`.
+	if !strings.Contains(out, `# {trace_id="`) {
+		t.Errorf("registry_deploy_duration_seconds carries no trace_id exemplar in OpenMetrics exposition\n%s", out)
+	}
 }
 
 type registryHandle struct {
-	URL    string
-	server *httptest.Server
+	URL     string
+	server  *httptest.Server
+	spans   *tracetest.SpanRecorder
+	metrics *prom.HTTPMetrics
+	audit   audit.Reader
 }
 
 func (r registryHandle) Close() { r.server.Close() }
@@ -112,6 +186,15 @@ func (r registryHandle) Close() { r.server.Close() }
 // the test's HTTP client calls.
 func bootRegistry(t *testing.T, markupSvcURL string) registryHandle {
 	t.Helper()
+
+	// Install a recording TracerProvider so the e2e can assert the
+	// lifecycle child spans land. The global is restored on cleanup.
+	spanRec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRec))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	prevTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { otel.SetTracerProvider(prevTP) })
 
 	disc, err := static.NewFromMap(map[string][]string{
 		"production": {markupSvcURL},
@@ -126,6 +209,7 @@ func bootRegistry(t *testing.T, markupSvcURL string) registryHandle {
 	idgen := ulid.New()
 	dep := rolling.New()
 	sink := &discardSink{}
+	metrics := prom.New()
 	now := func() time.Time { return time.Now().UTC() }
 
 	uploadDeps := httpapi.UploadDeps{
@@ -134,6 +218,7 @@ func bootRegistry(t *testing.T, markupSvcURL string) registryHandle {
 		ULID:      idgen,
 		Logger:    sink,
 		Now:       now,
+		Metrics:   metrics,
 	}
 	promoteDeps := &httpapi.PromoteDeps{
 		Artifacts: st,
@@ -144,6 +229,7 @@ func bootRegistry(t *testing.T, markupSvcURL string) registryHandle {
 		ULID:      idgen,
 		Logger:    sink,
 		Now:       now,
+		Metrics:   metrics,
 	}
 	rollbackDeps := &httpapi.RollbackDeps{
 		Artifacts: st,
@@ -154,6 +240,7 @@ func bootRegistry(t *testing.T, markupSvcURL string) registryHandle {
 		ULID:      idgen,
 		Logger:    sink,
 		Now:       now,
+		Metrics:   metrics,
 	}
 
 	deps := httpapi.Deps{
@@ -169,8 +256,14 @@ func bootRegistry(t *testing.T, markupSvcURL string) registryHandle {
 		Promote:   promoteDeps,
 		Rollback:  rollbackDeps,
 	}
-	srv := httptest.NewServer(httpapi.NewRouter(deps, http.NotFoundHandler()))
-	return registryHandle{URL: srv.URL, server: srv}
+	srv := httptest.NewServer(httpapi.NewRouter(deps, metrics.Handler()))
+	return registryHandle{
+		URL:     srv.URL,
+		server:  srv,
+		spans:   spanRec,
+		metrics: metrics,
+		audit:   au,
+	}
 }
 
 func uploadCSV(t *testing.T, registryURL string, csv []byte) string {
