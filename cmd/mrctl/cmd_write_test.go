@@ -67,6 +67,10 @@ func (s stubDiscovery) Instances(_ context.Context, _ string) ([]instances.Insta
 }
 
 func startWriteServer(t *testing.T) (*httptest.Server, store.Store) {
+	return startWriteServerWithDeployer(t, autoOKDeployer{})
+}
+
+func startWriteServerWithDeployer(t *testing.T, dep deployer.Deployer) (*httptest.Server, store.Store) {
 	t.Helper()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(tracetest.NewSpanRecorder()))
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
@@ -81,7 +85,7 @@ func startWriteServer(t *testing.T) (*httptest.Server, store.Store) {
 	promoteDeps := httpapi.PromoteDeps{
 		Artifacts: st, EnvState: envState, Audit: au,
 		Discovery: stubDiscovery{targets: []instances.Instance{{URL: "http://markup-svc-1:8080", Env: "production"}}},
-		Deployer:  autoOKDeployer{},
+		Deployer:  dep,
 		ULID:      idgen, Logger: logger,
 	}
 	rollbackDeps := httpapi.RollbackDeps{
@@ -178,6 +182,90 @@ func TestPromoteCommandPostsAndPrintsOutcome(t *testing.T) {
 	}
 	if resp.NewHash != string(h) || resp.Env != "production" || resp.Deploy.Outcome != "ok" {
 		t.Fatalf("response: %+v", resp)
+	}
+}
+
+func TestPromoteCommandRendersDiagnoseRejectionToStderr(t *testing.T) {
+	rejected := deployer.DeployResult{
+		Outcome: deployer.OutcomeDiagnoseRejected,
+		Instances: []deployer.InstanceResult{{
+			URL: "http://markup-svc-1:8080", Status: deployer.StatusDiagnoseRejected,
+			Duration: 2 * time.Millisecond,
+			Error:    "reload rejected: rule set failed Diagnose",
+			DiagnoseDetails: &deployer.DiagnoseDetails{
+				Healthy: false,
+				Errors:  []deployer.DiagnoseIssue{{Kind: "duplicate_name", Rule: "dup", Detail: "twice"}},
+			},
+		}},
+	}
+	server, st := startWriteServerWithDeployer(t, autoOKDeployer{out: rejected})
+	h, err := st.Put(context.Background(), store.PutRequest{
+		SourceBytes: []byte("alpha,rule,1.0,1\n"),
+		ContentType: store.ContentTypeCSV,
+		Metadata:    store.Metadata{CreatedBy: "ci-bot"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := []string{
+		"promote", "--registry", server.URL,
+		"--hash", string(h),
+		"--env", "production",
+		"--operator", "alice",
+		"--reason", "weekly",
+	}
+	code := Run(context.Background(), args, &stdout, &stderr, server.Client())
+	if code != 1 {
+		t.Fatalf("exit=%d want 1; stderr=%s", code, stderr.String())
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "promote_rejected: diagnose_rejected") {
+		t.Fatalf("stderr missing rejection header:\n%s", out)
+	}
+	if !strings.Contains(out, "duplicate_name") || !strings.Contains(out, "twice") {
+		t.Fatalf("stderr missing rule-level issue:\n%s", out)
+	}
+}
+
+func TestPromoteCommandJSONFlagOnRejectionEmitsEnvelopeToStdout(t *testing.T) {
+	rejected := deployer.DeployResult{
+		Outcome: deployer.OutcomeDiagnoseRejected,
+		Instances: []deployer.InstanceResult{{
+			URL: "http://markup-svc-1:8080", Status: deployer.StatusDiagnoseRejected,
+			Duration: 2 * time.Millisecond,
+			Error:    "reload rejected: rule set failed Diagnose",
+			DiagnoseDetails: &deployer.DiagnoseDetails{
+				Healthy: false,
+				Errors:  []deployer.DiagnoseIssue{{Kind: "dead_rule", Rule: "r2", Detail: "shadowed"}},
+			},
+		}},
+	}
+	server, st := startWriteServerWithDeployer(t, autoOKDeployer{out: rejected})
+	h, _ := st.Put(context.Background(), store.PutRequest{
+		SourceBytes: []byte("a,b,1.0,1\n"), ContentType: store.ContentTypeCSV,
+		Metadata: store.Metadata{CreatedBy: "ci-bot"},
+	})
+
+	var stdout, stderr bytes.Buffer
+	args := []string{
+		"promote", "--registry", server.URL,
+		"--hash", string(h), "--env", "production",
+		"--operator", "alice", "--reason", "weekly", "--json",
+	}
+	if code := Run(context.Background(), args, &stdout, &stderr, server.Client()); code != 1 {
+		t.Fatalf("exit=%d want 1; stderr=%s", code, stderr.String())
+	}
+	var rej httpapi.PromoteRejectedResponse
+	if err := json.NewDecoder(&stdout).Decode(&rej); err != nil {
+		t.Fatalf("decode stdout as PromoteRejectedResponse: %v\nraw=%s", err, stdout.String())
+	}
+	if rej.Reason != "diagnose_rejected" || rej.NewHash != string(h) {
+		t.Fatalf("envelope: %+v", rej)
+	}
+	if rej.Diagnose == nil || len(rej.Diagnose.Errors) != 1 || rej.Diagnose.Errors[0].Kind != "dead_rule" {
+		t.Fatalf("diagnose details lost: %+v", rej.Diagnose)
 	}
 }
 

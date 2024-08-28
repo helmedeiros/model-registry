@@ -7,10 +7,12 @@ package rolling
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -33,6 +35,14 @@ const tracerName = "github.com/helmedeiros/model-registry/internal/deployer/roll
 // timeout. Exposed as a wrapped sentinel so tests and metrics labels
 // can branch on the cause without parsing the human-readable string.
 var ErrReadyzTimeout = errors.New("deployer/rolling: readyz timed out")
+
+type diagnoseRejectedErr struct {
+	details *deployer.DiagnoseDetails
+}
+
+func (e *diagnoseRejectedErr) Error() string {
+	return "deployer/rolling: rule set failed Diagnose"
+}
 
 // Deployer is the rolling-push backing. Construct via New; the HTTP
 // client is injected so tests can drive against httptest.Server and
@@ -74,14 +84,26 @@ func New(opts ...Option) *Deployer {
 	return d
 }
 
-// Deploy implements deployer.Deployer.
+// Deploy short-circuits on the first StatusDiagnoseRejected — the
+// remaining instances would reject the same bytes the same way.
 func (d *Deployer) Deploy(ctx context.Context, targets []instances.Instance, body deployer.Body) (deployer.DeployResult, error) {
 	if len(targets) == 0 {
 		return deployer.DeployResult{}, deployer.ErrNoTargets
 	}
 	results := make([]deployer.InstanceResult, 0, len(targets))
-	for _, target := range targets {
-		results = append(results, d.deployOne(ctx, target, body))
+	for i, target := range targets {
+		res := d.deployOne(ctx, target, body)
+		results = append(results, res)
+		if res.Status == deployer.StatusDiagnoseRejected {
+			for _, skipped := range targets[i+1:] {
+				results = append(results, deployer.InstanceResult{
+					URL:    skipped.URL,
+					Status: deployer.StatusSkipped,
+					Error:  "diagnose rejected on upstream instance; skipped",
+				})
+			}
+			break
+		}
 	}
 	return deployer.DeployResult{
 		Instances: results,
@@ -105,6 +127,18 @@ func (d *Deployer) deployOne(ctx context.Context, target instances.Instance, bod
 	defer cancel()
 
 	if err := d.postReload(deployCtx, target, body); err != nil {
+		var dre *diagnoseRejectedErr
+		if errors.As(err, &dre) {
+			span.SetAttributes(attribute.String("diagnose.verdict", "rejected"))
+			span.SetStatus(codes.Error, "diagnose rejected")
+			return deployer.InstanceResult{
+				URL:             target.URL,
+				Status:          deployer.StatusDiagnoseRejected,
+				Duration:        time.Since(start),
+				Error:           err.Error(),
+				DiagnoseDetails: dre.details,
+			}
+		}
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "post_reload failed")
 		return deployer.InstanceResult{
@@ -147,9 +181,57 @@ func (d *Deployer) postReload(ctx context.Context, target instances.Instance, bo
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusBadRequest {
+			if details, ok := parseDiagnoseRejection(b); ok {
+				return &diagnoseRejectedErr{details: details}
+			}
+		}
 		return fmt.Errorf("/admin/reload %s: %s", resp.Status, string(b))
 	}
 	return nil
+}
+
+// reloadRejectBody mirrors markup-svc/ADR-0026's reject envelope. The
+// `error` sentinel is the discriminator: any 400 carrying healthy:false
+// alone could be a generic envelope from a future markup-svc error
+// branch (auth, content-type, body-too-large). markup-svc's Diagnose
+// reject always carries the literal "reload rejected: rule set failed
+// Diagnose" string.
+type reloadRejectBody struct {
+	Error    string `json:"error"`
+	Healthy  bool   `json:"healthy"`
+	Errors   []reloadIssue `json:"errors,omitempty"`
+	Warnings []reloadIssue `json:"warnings,omitempty"`
+}
+
+type reloadIssue struct {
+	Kind   string `json:"kind"`
+	Rule   string `json:"rule,omitempty"`
+	Detail string `json:"detail"`
+}
+
+const diagnoseRejectSentinel = "rule set failed Diagnose"
+
+func parseDiagnoseRejection(body []byte) (*deployer.DiagnoseDetails, bool) {
+	var b reloadRejectBody
+	if err := json.Unmarshal(body, &b); err != nil {
+		return nil, false
+	}
+	if b.Healthy || !strings.Contains(b.Error, diagnoseRejectSentinel) {
+		return nil, false
+	}
+	d := &deployer.DiagnoseDetails{
+		Healthy:  b.Healthy,
+		Errors:   make([]deployer.DiagnoseIssue, 0, len(b.Errors)),
+		Warnings: make([]deployer.DiagnoseIssue, 0, len(b.Warnings)),
+	}
+	for _, e := range b.Errors {
+		d.Errors = append(d.Errors, deployer.DiagnoseIssue{Kind: e.Kind, Rule: e.Rule, Detail: e.Detail})
+	}
+	for _, w := range b.Warnings {
+		d.Warnings = append(d.Warnings, deployer.DiagnoseIssue{Kind: w.Kind, Rule: w.Rule, Detail: w.Detail})
+	}
+	return d, true
 }
 
 func (d *Deployer) waitReadyz(ctx context.Context, target instances.Instance) error {

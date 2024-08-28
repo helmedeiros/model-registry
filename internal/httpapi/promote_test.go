@@ -70,6 +70,27 @@ func failedResult() deployer.DeployResult {
 	}
 }
 
+func diagnoseRejectedResult() deployer.DeployResult {
+	return deployer.DeployResult{
+		Outcome: deployer.OutcomeDiagnoseRejected,
+		Instances: []deployer.InstanceResult{
+			{
+				URL:      "http://markup-svc-1:8080",
+				Status:   deployer.StatusDiagnoseRejected,
+				Duration: 2 * time.Millisecond,
+				Error:    "reload rejected: rule set failed Diagnose",
+				DiagnoseDetails: &deployer.DiagnoseDetails{
+					Healthy: false,
+					Errors: []deployer.DiagnoseIssue{
+						{Kind: "duplicate_name", Rule: "dup", Detail: "twice"},
+					},
+				},
+			},
+			{URL: "http://markup-svc-2:8080", Status: deployer.StatusSkipped, Error: "diagnose rejected on upstream instance; skipped"},
+		},
+	}
+}
+
 func newPromoteDeps(t testing.TB, deploy deployer.DeployResult) (httpapi.PromoteDeps, store.Store, envstate.Store, audit.Reader, *captureSink) {
 	t.Helper()
 	st := memstore.New()
@@ -366,3 +387,41 @@ func TestPromotePanicsOnMissingDeps(t *testing.T) {
 }
 
 var _ = errors.New // keep errors import live when only used in stubs
+
+func TestPromoteDiagnoseRejectedReturns422AndRecordsAudit(t *testing.T) {
+	deps, st, envState, au, _ := newPromoteDeps(t, diagnoseRejectedResult())
+	h := putRule(t, st, []byte("alpha,rule,1.0,1\n"))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/promote", promoteBody(t, httpapi.PromoteRequest{
+		Hash: string(h), Env: "production", Role: "champion", Operator: "alice", Reason: "monetization gate test",
+	}))
+	httpapi.Promote(deps).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d want 422; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp httpapi.PromoteRejectedResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Reason != "diagnose_rejected" || resp.NewHash != string(h) || resp.Env != "production" {
+		t.Fatalf("response: %+v", resp)
+	}
+	if resp.Diagnose == nil || resp.Diagnose.Healthy {
+		t.Fatalf("diagnose details missing or healthy: %+v", resp.Diagnose)
+	}
+	if len(resp.Diagnose.Errors) != 1 || resp.Diagnose.Errors[0].Kind != "duplicate_name" {
+		t.Fatalf("diagnose errors not surfaced: %+v", resp.Diagnose.Errors)
+	}
+
+	state, _ := envState.Get(context.Background(), "production")
+	if state.Champion != nil {
+		t.Fatalf("diagnose_rejected must NOT commit state: %+v", state)
+	}
+
+	page, _ := au.List(context.Background(), audit.ListOptions{})
+	if len(page.Items) != 1 || page.Items[0].Action != "promote_rejected" {
+		t.Fatalf("audit entry: got %+v want action=promote_rejected", page.Items)
+	}
+}

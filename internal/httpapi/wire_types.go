@@ -141,6 +141,26 @@ type PromoteResponse struct {
 	Deploy       DeployView `json:"deploy"`
 }
 
+type PromoteRejectedResponse struct {
+	Env      string               `json:"env"`
+	NewHash  string               `json:"new_hash"`
+	Reason   string               `json:"reason"`
+	Diagnose *DiagnoseDetailsView `json:"diagnose,omitempty"`
+	Deploy   DeployView           `json:"deploy"`
+}
+
+type DiagnoseDetailsView struct {
+	Healthy  bool                 `json:"healthy"`
+	Errors   []DiagnoseIssueView  `json:"errors,omitempty"`
+	Warnings []DiagnoseIssueView  `json:"warnings,omitempty"`
+}
+
+type DiagnoseIssueView struct {
+	Kind   string `json:"kind"`
+	Rule   string `json:"rule,omitempty"`
+	Detail string `json:"detail"`
+}
+
 // --- rollback (ADR-0005) ---
 
 type RollbackRequest struct {

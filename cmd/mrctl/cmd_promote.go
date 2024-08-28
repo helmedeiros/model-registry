@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,6 +39,10 @@ func runPromote(ctx context.Context, args []string, stdout, stderr io.Writer, c 
 
 	var resp httpapi.PromoteResponse
 	if _, err := postJSON(ctx, c, common.registry, "/promote", bytes.NewReader(body), "application/json", &resp); err != nil {
+		var he *httpError
+		if errors.As(err, &he) && he.status == http.StatusUnprocessableEntity {
+			return renderPromoteRejection(stdout, stderr, common.jsonOut, he.body)
+		}
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -47,4 +52,26 @@ func runPromote(ctx context.Context, args []string, stdout, stderr io.Writer, c 
 	}
 	printDeployResult(stdout, resp.Env, resp.PreviousHash, resp.NewHash, resp.Deploy)
 	return 0
+}
+
+func renderPromoteRejection(stdout, stderr io.Writer, jsonOut bool, body []byte) int {
+	var rej httpapi.PromoteRejectedResponse
+	if err := json.Unmarshal(body, &rej); err != nil {
+		fmt.Fprintln(stderr, "registry: 422:", string(body))
+		return 1
+	}
+	if jsonOut {
+		_ = emitJSON(stdout, stderr, rej)
+		return 1
+	}
+	fmt.Fprintf(stderr, "promote_rejected: %s (hash=%s env=%s)\n", rej.Reason, rej.NewHash, rej.Env)
+	if rej.Diagnose != nil {
+		for _, e := range rej.Diagnose.Errors {
+			fmt.Fprintf(stderr, "  ✗ %s [%s]: %s\n", e.Kind, e.Rule, e.Detail)
+		}
+		for _, w := range rej.Diagnose.Warnings {
+			fmt.Fprintf(stderr, "  ⚠ %s [%s]: %s\n", w.Kind, w.Rule, w.Detail)
+		}
+	}
+	return 1
 }

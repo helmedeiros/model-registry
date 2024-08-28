@@ -72,7 +72,7 @@ func New() *HTTPMetrics {
 	promotions := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "registry_promotions_total",
-			Help: "Total /promote calls, labelled by env / role / outcome (ok|partial|failed|hash_unknown|deprecated|invalid_env).",
+			Help: "Total /promote calls, labelled by env / role / outcome (ok|partial|failed|diagnose_rejected|hash_unknown|deprecated|invalid_env).",
 		},
 		[]string{"env", "role", "outcome"},
 	)
@@ -86,7 +86,7 @@ func New() *HTTPMetrics {
 	deploys := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "registry_deploys_total",
-			Help: "Total instance deploys executed by the rolling deployer, labelled by outcome (deployed|failed|skipped).",
+			Help: "Total instance deploys executed by the rolling deployer, labelled by outcome (deployed|failed|skipped|diagnose_rejected).",
 		},
 		[]string{"outcome"},
 	)

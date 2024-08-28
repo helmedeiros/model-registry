@@ -23,30 +23,45 @@ type Body struct {
 type Status string
 
 const (
-	StatusDeployed Status = "deployed"
-	StatusFailed   Status = "failed"
-	StatusSkipped  Status = "skipped"
+	StatusDeployed         Status = "deployed"
+	StatusFailed           Status = "failed"
+	StatusSkipped          Status = "skipped"
+	StatusDiagnoseRejected Status = "diagnose_rejected"
 )
 
-// Outcome enumerates aggregate deploy outcomes per ADR-0005's
-// {ok, partial, failed} rules:
-//   - ok: every instance reports StatusDeployed.
-//   - partial: at least one StatusDeployed and at least one StatusFailed.
-//   - failed: zero StatusDeployed.
+// Outcome aggregates the per-instance Statuses per ADR-0005/0006.
 type Outcome string
 
 const (
-	OutcomeOK      Outcome = "ok"
-	OutcomePartial Outcome = "partial"
-	OutcomeFailed  Outcome = "failed"
+	OutcomeOK               Outcome = "ok"
+	OutcomePartial          Outcome = "partial"
+	OutcomeFailed           Outcome = "failed"
+	OutcomeDiagnoseRejected Outcome = "diagnose_rejected"
 )
 
 // InstanceResult records one instance's deploy attempt.
+// DiagnoseDetails is non-nil only when Status == StatusDiagnoseRejected.
 type InstanceResult struct {
-	URL      string
-	Status   Status
-	Duration time.Duration
-	Error    string
+	URL             string
+	Status          Status
+	Duration        time.Duration
+	Error           string
+	DiagnoseDetails *DiagnoseDetails
+}
+
+// DiagnoseDetails is the rule-level verdict surfaced when a deploy is
+// rejected for Diagnose (markup-svc/ADR-0026). The port carries the
+// domain shape; adapters own wire-format marshalling.
+type DiagnoseDetails struct {
+	Healthy  bool
+	Errors   []DiagnoseIssue
+	Warnings []DiagnoseIssue
+}
+
+type DiagnoseIssue struct {
+	Kind   string
+	Rule   string
+	Detail string
 }
 
 // DeployResult is what Deploy returns. Outcome summarises the
@@ -72,12 +87,17 @@ type Deployer interface {
 // retrying — there is no fleet to push to.
 var ErrNoTargets = errors.New("deployer: no targets to deploy to")
 
-// SummariseOutcome maps the per-instance Statuses into the aggregate
-// Outcome rules. Exposed so both internal strategies and tests
-// produce a uniform result envelope.
+// SummariseOutcome maps per-instance Statuses to the aggregate Outcome.
+// StatusDiagnoseRejected is sticky because a Diagnose verdict applies
+// to the rule set, not the instance.
 func SummariseOutcome(results []InstanceResult) Outcome {
 	if len(results) == 0 {
 		return OutcomeFailed
+	}
+	for _, r := range results {
+		if r.Status == StatusDiagnoseRejected {
+			return OutcomeDiagnoseRejected
+		}
 	}
 	deployed := 0
 	for _, r := range results {

@@ -53,3 +53,30 @@ func TestSummariseOutcomeAllSkippedReturnsFailed(t *testing.T) {
 		t.Fatalf("got %v want OutcomeFailed", got)
 	}
 }
+
+func TestSummariseOutcomeDiagnoseRejectedSticky(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		results []deployer.InstanceResult
+	}{
+		{"alone", []deployer.InstanceResult{{Status: deployer.StatusDiagnoseRejected}}},
+		{"with_skipped", []deployer.InstanceResult{
+			{Status: deployer.StatusDiagnoseRejected},
+			{Status: deployer.StatusSkipped},
+		}},
+		{"beats_deployed", []deployer.InstanceResult{
+			{Status: deployer.StatusDeployed},
+			{Status: deployer.StatusDiagnoseRejected},
+		}},
+		{"beats_failed", []deployer.InstanceResult{
+			{Status: deployer.StatusFailed},
+			{Status: deployer.StatusDiagnoseRejected},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := deployer.SummariseOutcome(tc.results); got != deployer.OutcomeDiagnoseRejected {
+				t.Fatalf("got %v want OutcomeDiagnoseRejected", got)
+			}
+		})
+	}
+}

@@ -7,6 +7,15 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- ADR-0006 Accepted: Promotion gates. `POST /promote` short-circuits with `422 promote_rejected` when markup-svc's Diagnose layer (ADR-0026 in that repo) rejects the rule set on the first instance. Distinct from `502 outcome=failed` (sick data plane) so operators can hop between two failure modes from one signal.
+- `deployer.StatusDiagnoseRejected` + `OutcomeDiagnoseRejected` + `InstanceResult.DiagnoseDetails`. `SummariseOutcome` treats `StatusDiagnoseRejected` as sticky. `rolling.Deploy` parses the markup-svc reject body `{healthy:false, errors, warnings}` and short-circuits the remaining instances with `StatusSkipped` so a 3-instance fleet pays one rejection latency instead of three.
+- `httpapi.PromoteRejectedResponse` + `DiagnoseDetailsView` + `DiagnoseIssueView` wire types. The response carries the rule-level issue list verbatim from markup-svc so a UI renders one panel against either source.
+- Audit action `promote_rejected` (distinct from `promote`); recorded by a new `recordPromoteRejected` path that shares the ULID + TraceID plumbing with the success path.
+- Metric outcome `diagnose_rejected` on `registry_promotions_total` + `registry_deploys_total`. The pricing-observability `RegistryPromotionFailureRate` alert (matches `outcome=~failed|partial`) deliberately does NOT trip on it — a rejected rule set is operator action, not platform fault.
+- `mrctl promote` recognises the 422 and renders the rule-level error/warning list to stderr in human form (or JSON via `--json`). The CLI exits 1 on rejection so a CI gate using `mrctl` fails fast.
+
 ## [0.0.4] - 2024-08-13
 
 ### Added

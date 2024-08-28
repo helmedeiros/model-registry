@@ -195,6 +195,70 @@ func TestDeployEmitsPushAndReadyzChildSpans(t *testing.T) {
 	}
 }
 
+func TestDeployDiagnoseRejectedShortCircuits(t *testing.T) {
+	rejectBody := `{"error":"reload rejected: rule set failed Diagnose","healthy":false,"errors":[{"kind":"duplicate_name","rule":"dup","detail":"twice"}]}`
+	// Discriminator sanity: the same 400 body without the sentinel
+	// should NOT be classified as Diagnose-rejected (covered by a
+	// distinct test below).
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path == "/admin/reload" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(rejectBody))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	d := rolling.New(rolling.WithHTTPClient(srv.Client()), rolling.WithReadyzInterval(time.Millisecond))
+	targets := []instances.Instance{{URL: srv.URL}, {URL: srv.URL}, {URL: srv.URL}}
+	got, err := d.Deploy(context.Background(), targets, deployer.Body{ContentType: "text/csv", Bytes: []byte("x")})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if got.Outcome != deployer.OutcomeDiagnoseRejected {
+		t.Fatalf("outcome=%q want %q", got.Outcome, deployer.OutcomeDiagnoseRejected)
+	}
+	if len(got.Instances) != 3 {
+		t.Fatalf("instances=%d want 3 (1 rejected + 2 skipped)", len(got.Instances))
+	}
+	if got.Instances[0].Status != deployer.StatusDiagnoseRejected {
+		t.Fatalf("instances[0].Status=%q want %q", got.Instances[0].Status, deployer.StatusDiagnoseRejected)
+	}
+	if got.Instances[0].DiagnoseDetails == nil || got.Instances[0].DiagnoseDetails.Healthy {
+		t.Fatalf("DiagnoseDetails missing or healthy: %+v", got.Instances[0].DiagnoseDetails)
+	}
+	if got.Instances[1].Status != deployer.StatusSkipped || got.Instances[2].Status != deployer.StatusSkipped {
+		t.Fatalf("subsequent instances not Skipped: %+v %+v", got.Instances[1], got.Instances[2])
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("server hits=%d want 1 (short-circuit)", hits.Load())
+	}
+}
+
+func TestDeployGeneric400WithoutSentinelStillFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"auth required","healthy":false}`))
+	}))
+	defer srv.Close()
+	d := rolling.New(rolling.WithHTTPClient(srv.Client()), rolling.WithReadyzInterval(time.Millisecond))
+	got, err := d.Deploy(context.Background(), []instances.Instance{{URL: srv.URL}}, deployer.Body{ContentType: "text/csv", Bytes: []byte("x")})
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if got.Outcome != deployer.OutcomeFailed {
+		t.Fatalf("outcome=%q want failed (no Diagnose sentinel = not a Diagnose rejection)", got.Outcome)
+	}
+	if got.Instances[0].Status != deployer.StatusFailed {
+		t.Fatalf("status=%q want failed", got.Instances[0].Status)
+	}
+}
+
 // --- helpers ---
 
 type behavior struct {

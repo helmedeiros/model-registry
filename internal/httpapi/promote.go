@@ -122,10 +122,38 @@ func (deps PromoteDeps) runChampionPromote(ctx context.Context, w http.ResponseW
 	// Deploy return — keeps the histogram's count aligned with
 	// registry_deploys_total so a future Grafana rate ratio is honest.
 	deps.Metrics.ObserveDeployDuration(ctx, deps.Now().Sub(deployStart))
+	// On a Diagnose rejection: one instance gets outcome=diagnose_rejected,
+	// the rest get outcome=skipped. registry_promotions_total fires once
+	// regardless. A panel summing deploys by outcome should sum
+	// diagnose_rejected + skipped to recover the fleet size on rejection.
 	for _, ir := range deployResult.Instances {
 		deps.Metrics.RecordDeploy(string(ir.Status))
 	}
 	view := deployView(deployResult)
+
+	if deployResult.Outcome == deployer.OutcomeDiagnoseRejected {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "diagnose_rejected")
+		auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
+		if err := deps.recordPromoteRejected(auditCtx, req, hash); err != nil {
+			auditSpan.RecordError(err)
+			logInfoWithTrace(deps.Logger, auditCtx, "registry.audit.write_failed", map[string]any{
+				"action":        "promote_rejected",
+				"env":           req.Env,
+				"artifact_hash": req.Hash,
+				"operator":      req.Operator,
+				"error":         err.Error(),
+			})
+		}
+		auditSpan.End()
+		writeJSON(w, http.StatusUnprocessableEntity, PromoteRejectedResponse{
+			Env:      req.Env,
+			NewHash:  req.Hash,
+			Reason:   "diagnose_rejected",
+			Diagnose: diagnoseDetailsView(deployResult.Instances),
+			Deploy:   view,
+		})
+		return
+	}
 
 	// Partial-deploy commits state per ADR-0005; full failure does
 	// NOT — the upload survives but the promotion does not.
@@ -185,6 +213,14 @@ func roleHashOrEmpty(r *envstate.Role) string {
 }
 
 func (deps PromoteDeps) recordPromote(ctx context.Context, req PromoteRequest, hash store.Hash) error {
+	return deps.recordPromoteAction(ctx, req, hash, "promote")
+}
+
+func (deps PromoteDeps) recordPromoteRejected(ctx context.Context, req PromoteRequest, hash store.Hash) error {
+	return deps.recordPromoteAction(ctx, req, hash, "promote_rejected")
+}
+
+func (deps PromoteDeps) recordPromoteAction(ctx context.Context, req PromoteRequest, hash store.Hash, action string) error {
 	id, err := deps.ULID.New()
 	if err != nil {
 		return err
@@ -192,7 +228,7 @@ func (deps PromoteDeps) recordPromote(ctx context.Context, req PromoteRequest, h
 	return deps.Audit.Record(ctx, audit.Entry{
 		ID:           id,
 		Operator:     req.Operator,
-		Action:       "promote",
+		Action:       action,
 		Target:       "env/" + req.Env + "/champion",
 		ArtifactHash: hash,
 		Reason:       req.Reason,
@@ -226,6 +262,28 @@ func deployView(r deployer.DeployResult) DeployView {
 		})
 	}
 	return out
+}
+
+func diagnoseDetailsView(results []deployer.InstanceResult) *DiagnoseDetailsView {
+	for _, ir := range results {
+		if ir.DiagnoseDetails == nil {
+			continue
+		}
+		d := ir.DiagnoseDetails
+		out := &DiagnoseDetailsView{
+			Healthy:  d.Healthy,
+			Errors:   make([]DiagnoseIssueView, 0, len(d.Errors)),
+			Warnings: make([]DiagnoseIssueView, 0, len(d.Warnings)),
+		}
+		for _, e := range d.Errors {
+			out.Errors = append(out.Errors, DiagnoseIssueView{Kind: e.Kind, Rule: e.Rule, Detail: e.Detail})
+		}
+		for _, w := range d.Warnings {
+			out.Warnings = append(out.Warnings, DiagnoseIssueView{Kind: w.Kind, Rule: w.Rule, Detail: w.Detail})
+		}
+		return out
+	}
+	return nil
 }
 
 func (d PromoteDeps) withDefaults() PromoteDeps {

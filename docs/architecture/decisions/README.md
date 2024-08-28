@@ -23,4 +23,5 @@ NNNN-short-decision-name.md
 | [0002](0002-versioned-config-store-substrate.md) | Versioned Config Store — typed Go substrate | ✅ Accepted |
 | [0003](0003-service-shell-and-observability-bootstrap.md) | Service shell and observability bootstrap | ✅ Accepted |
 | [0004](0004-read-only-operator-endpoints.md) | Read-only operator endpoints | ✅ Accepted |
-| [0005](0005-champion-lifecycle-and-deployer.md) | Champion lifecycle and markup-svc deployer | 🟡 Proposed |
+| [0005](0005-champion-lifecycle-and-deployer.md) | Champion lifecycle and markup-svc deployer | ✅ Accepted |
+| [0006](0006-promotion-gates.md) | Promotion gates — Diagnose verdict short-circuits /promote with 422 | ✅ Accepted |

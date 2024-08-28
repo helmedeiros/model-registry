@@ -103,12 +103,22 @@ func postJSON(ctx context.Context, c *http.Client, base, path string, body io.Re
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, fmt.Errorf("registry: %s: %s", resp.Status, string(raw))
+		return resp.StatusCode, &httpError{status: resp.StatusCode, statusText: resp.Status, body: raw}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 		return resp.StatusCode, fmt.Errorf("decode body: %w", err)
 	}
 	return resp.StatusCode, nil
+}
+
+type httpError struct {
+	status     int
+	statusText string
+	body       []byte
+}
+
+func (e *httpError) Error() string {
+	return fmt.Sprintf("registry: %s: %s", e.statusText, string(e.body))
 }
 
 func buildURL(base, path string, query url.Values) (*url.URL, error) {
