@@ -21,6 +21,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/audit/fsaudit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
+	"github.com/helmedeiros/model-registry/internal/canary"
 	"github.com/helmedeiros/model-registry/internal/config"
 	"github.com/helmedeiros/model-registry/internal/deployer/rolling"
 	"github.com/helmedeiros/model-registry/internal/envstate"
@@ -129,6 +130,14 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	}
 	if promoteDeps, err := buildPromoteDeps(cfg, st, envState, auditLog, idgen, logger); err == nil {
 		promoteDeps.Metrics = metrics
+		if sup := buildCanarySupervisor(cfg, promoteDeps, metrics); sup != nil {
+			promoteDeps.Canary = sup
+			logger.Info("registry.canary.enabled", map[string]any{
+				"prom_url":  cfg.CanaryPromURL,
+				"window":    cfg.CanaryWindow.String(),
+				"threshold": cfg.CanaryThreshold,
+			})
+		}
 		deps.Promote = promoteDeps
 		deps.Rollback = &httpapi.RollbackDeps{
 			Artifacts: promoteDeps.Artifacts,
@@ -214,6 +223,29 @@ func buildPromoteDeps(cfg config.Config, st store.Store, envState envstate.Store
 		ULID:      idgen,
 		Logger:    logger,
 	}, nil
+}
+
+func buildCanarySupervisor(cfg config.Config, p *httpapi.PromoteDeps, metrics *prom.HTTPMetrics) *httpapi.CanarySupervisor {
+	if cfg.CanaryPromURL == "" {
+		return nil
+	}
+	decider := canary.NewPromDecider(cfg.CanaryPromURL,
+		canary.WithPromWindow(cfg.CanaryWindow),
+		canary.WithPromPollEvery(cfg.CanaryPollEvery),
+		canary.WithPromThreshold(cfg.CanaryThreshold),
+		canary.WithPromMinSamples(cfg.CanaryMinSamples),
+	)
+	return &httpapi.CanarySupervisor{
+		Decider:   decider,
+		Artifacts: p.Artifacts,
+		EnvState:  p.EnvState,
+		Discovery: p.Discovery,
+		Deployer:  p.Deployer,
+		Audit:     p.Audit,
+		ULID:      p.ULID,
+		Logger:    p.Logger,
+		Metrics:   metrics,
+	}
 }
 
 func openStore(cfg config.Config) (store.Store, func() error, error) {

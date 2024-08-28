@@ -66,6 +66,22 @@ func TestSeparateInstancesDoNotShareState(t *testing.T) {
 	}
 }
 
+func TestRecordCanaryTicksAndExposes(t *testing.T) {
+	m := prom.New()
+	m.RecordCanary("production", "kept")
+	m.RecordCanary("production", "rolled_back")
+	m.RecordCanary("production", "rolled_back")
+	out := exposition(t, m)
+	for _, line := range []string{
+		`registry_canary_decisions_total{decision="kept",env="production"} 1`,
+		`registry_canary_decisions_total{decision="rolled_back",env="production"} 2`,
+	} {
+		if !strings.Contains(out, line) {
+			t.Fatalf("expected %q in exposition\n%s", line, out)
+		}
+	}
+}
+
 func TestLifecycleCountersTickAndExpose(t *testing.T) {
 	m := prom.New()
 	m.RecordUpload("ok")

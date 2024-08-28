@@ -32,13 +32,14 @@ type HTTPMetrics struct {
 	requests *prometheus.CounterVec
 	duration *prometheus.HistogramVec
 	// Lifecycle counters per ROADMAP Iteration 4 §Observability.
-	uploads     *prometheus.CounterVec
-	promotions  *prometheus.CounterVec
-	rollbacks   *prometheus.CounterVec
-	deploys     *prometheus.CounterVec
-	deployDur   *prometheus.HistogramVec
-	stateDrift  *prometheus.CounterVec
-	handler     http.Handler
+	uploads    *prometheus.CounterVec
+	promotions *prometheus.CounterVec
+	rollbacks  *prometheus.CounterVec
+	deploys    *prometheus.CounterVec
+	deployDur  *prometheus.HistogramVec
+	stateDrift *prometheus.CounterVec
+	canary     *prometheus.CounterVec
+	handler    http.Handler
 }
 
 // New constructs a HTTPMetrics with the registry_http_* family
@@ -105,7 +106,14 @@ func New() *HTTPMetrics {
 		},
 		[]string{"env"},
 	)
-	reg.MustRegister(requests, duration, uploads, promotions, rollbacks, deploys, deployDur, stateDrift)
+	canaryDec := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "registry_canary_decisions_total",
+			Help: "Total post-promote canary decisions per ADR-0007, labelled by env / decision (kept|rolled_back|inconclusive).",
+		},
+		[]string{"env", "decision"},
+	)
+	reg.MustRegister(requests, duration, uploads, promotions, rollbacks, deploys, deployDur, stateDrift, canaryDec)
 	return &HTTPMetrics{
 		reg:        reg,
 		requests:   requests,
@@ -116,6 +124,7 @@ func New() *HTTPMetrics {
 		deploys:    deploys,
 		deployDur:  deployDur,
 		stateDrift: stateDrift,
+		canary:     canaryDec,
 		// EnableOpenMetrics carries exemplar lines through the /metrics
 		// exposition so a Grafana panel can drill from a histogram bar
 		// to the Jaeger trace whose id is on the exemplar.
@@ -177,6 +186,10 @@ func traceIDFromCtx(ctx context.Context) string {
 // RecordStateDrift ticks the race-detected divergence counter.
 func (m *HTTPMetrics) RecordStateDrift(env string) {
 	m.stateDrift.WithLabelValues(env).Inc()
+}
+
+func (m *HTTPMetrics) RecordCanary(env, decision string) {
+	m.canary.WithLabelValues(env, decision).Inc()
 }
 
 // RecordRequest increments the per-request counter and records the

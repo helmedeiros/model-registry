@@ -31,6 +31,12 @@ type RollbackMetrics interface {
 	RecordStateDrift(env string)
 }
 
+// CanaryMetrics is the observability surface the post-promote canary
+// supervisor (ADR-0007) uses.
+type CanaryMetrics interface {
+	RecordCanary(env, decision string)
+}
+
 // noopMetrics drops every call. One struct that satisfies all three
 // per-handler interfaces is enough — there is exactly one no-op
 // behaviour to keep in sync.
@@ -42,3 +48,4 @@ func (noopMetrics) RecordRollback(string, string)          {}
 func (noopMetrics) RecordDeploy(string)                    {}
 func (noopMetrics) ObserveDeployDuration(context.Context, time.Duration) {}
 func (noopMetrics) RecordStateDrift(string)                {}
+func (noopMetrics) RecordCanary(string, string)            {}

@@ -32,6 +32,10 @@ type PromoteDeps struct {
 	Logger    AccessSink
 	Now       func() time.Time
 	Metrics   PromoteMetrics
+	// Canary, when non-nil, extends a successful promote with a post-
+	// deploy observation window (ADR-0007); nil preserves v0.0.4
+	// behaviour.
+	Canary CanaryObserver
 }
 
 // Promote returns the POST /promote handler per ADR-0005.
@@ -197,6 +201,11 @@ func (deps PromoteDeps) runChampionPromote(ctx context.Context, w http.ResponseW
 	} else {
 		deps.Metrics.RecordPromotion(req.Env, req.Role, "ok")
 	}
+
+	if deps.Canary != nil {
+		go deps.Canary.Observe(context.WithoutCancel(ctx), req.Env, req.Hash, req.Operator)
+	}
+
 	writeJSON(w, http.StatusOK, PromoteResponse{
 		Env:          req.Env,
 		PreviousHash: string(previousHash),
