@@ -39,8 +39,19 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w" \
     -o /out/model-registry ./cmd/model-registry
 
+# Pre-create the default --store-root with the runtime user's
+# ownership. Distroless has no shell + no mkdir, so an empty
+# directory has to be materialised in the build stage and copied
+# in with --chown. Without this, a `docker compose` named volume
+# mounted at /data inherits root:root ownership and the registry's
+# fsstate / fsaudit / fsstore opens fail with errno 14 ("unable to
+# open database file"). Operators who override --store-root to a
+# different path are unaffected.
+RUN mkdir -p /out/data
+
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/model-registry /usr/local/bin/model-registry
+COPY --from=build --chown=65532:65532 /out/data /data
 
 # Distroless :nonroot ships USER 65532:65532. The explicit USER line
 # documents the inherited posture and survives a base-image change
