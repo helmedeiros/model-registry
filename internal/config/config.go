@@ -32,6 +32,7 @@ type Config struct {
 	WriteRateRefill    time.Duration
 	WriteRateBurst     int
 	BusinessStatsPromURL string
+	ShadowStatsPromURL   string
 }
 
 const (
@@ -85,6 +86,7 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 	writeBurstStr := envOr("REGISTRY_WRITE_RATE_BURST", strconv.Itoa(cfg.WriteRateBurst))
 	fs.StringVar(&writeBurstStr, "write-rate-burst", writeBurstStr, "Token-bucket burst per env on /promote + /rollback.")
 	fs.StringVar(&cfg.BusinessStatsPromURL, "business-stats-prom-url", envOr("REGISTRY_BUSINESS_STATS_PROM_URL", cfg.BusinessStatsPromURL), "Prometheus base URL for /env/<env>/business-stats. Empty = endpoint disabled.")
+	fs.StringVar(&cfg.ShadowStatsPromURL, "shadow-stats-prom-url", envOr("REGISTRY_SHADOW_STATS_PROM_URL", cfg.ShadowStatsPromURL), "Prometheus base URL for /shadow-stats (markup-svc challenger comparison metrics, ADR-0013). Empty = endpoint disabled.")
 	// flag.DurationVar cannot be pre-seeded from env; bind a string
 	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
 	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())

@@ -59,6 +59,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, httpClien
 		return runStats(ctx, rest, stdout, stderr, httpClient)
 	case "diff":
 		return runDiff(ctx, rest, stdout, stderr, httpClient)
+	case "shadow":
+		return runShadow(ctx, rest, stdout, stderr, httpClient)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage())
 		return 0
@@ -81,6 +83,7 @@ Read subcommands (ADR-0004):
   audit [--limit N] [--json]                   operator action log
   stats <env> [--since 5m] [--json]            business outcome metrics
   diff <from-hash> <to-hash> [--json]          rule provenance diff between bundles
+  shadow [--since 5m] [--json]                 markup-svc challenger comparison metrics
 
 Write subcommands (ADR-0005, ADR-0009):
   upload --file <path> [--snapshot <path>] [--diagnose <path>]

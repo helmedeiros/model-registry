@@ -22,6 +22,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/audit/fsaudit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
 	"github.com/helmedeiros/model-registry/internal/businessstats"
+	"github.com/helmedeiros/model-registry/internal/shadowstats"
 	"github.com/helmedeiros/model-registry/internal/canary"
 	"github.com/helmedeiros/model-registry/internal/config"
 	"github.com/helmedeiros/model-registry/internal/deployer/rolling"
@@ -170,6 +171,10 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		deps.BusinessStats = &httpapi.BusinessStatsDeps{Reader: reader}
 		logger.Info("registry.business_stats.enabled", map[string]any{"prom_url": cfg.BusinessStatsPromURL})
 	}
+	if reader := buildShadowStatsReader(cfg); reader != nil {
+		deps.ShadowStats = &httpapi.ShadowStatsDeps{Reader: reader}
+		logger.Info("registry.shadow_stats.enabled", map[string]any{"prom_url": cfg.ShadowStatsPromURL})
+	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),
 	}
@@ -255,6 +260,13 @@ func buildBusinessStatsReader(cfg config.Config) businessstats.Reader {
 		return nil
 	}
 	return businessstats.NewPromReader(cfg.BusinessStatsPromURL)
+}
+
+func buildShadowStatsReader(cfg config.Config) shadowstats.Reader {
+	if cfg.ShadowStatsPromURL == "" {
+		return nil
+	}
+	return shadowstats.NewPromReader(cfg.ShadowStatsPromURL)
 }
 
 func buildCanarySupervisor(cfg config.Config, p *httpapi.PromoteDeps, metrics *prom.HTTPMetrics) *httpapi.CanarySupervisor {

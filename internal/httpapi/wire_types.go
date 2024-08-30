@@ -237,6 +237,21 @@ type BusinessRuleView struct {
 	RatePerSecond float64 `json:"rate_per_second"`
 }
 
+// --- shadow-stats (ADR-0013) ---
+
+type ShadowStatsView struct {
+	Since                 string  `json:"since"`
+	AgreementRate         float64 `json:"agreement_rate"`
+	AgreementSamples      float64 `json:"agreement_samples"`
+	OneSidedChampionRPS   float64 `json:"one_sided_champion_rps"`
+	OneSidedChallengerRPS float64 `json:"one_sided_challenger_rps"`
+	TimeoutRPS            float64 `json:"timeout_rps"`
+	ErrorRPS              float64 `json:"error_rps"`
+	FactorDeltaP50        float64 `json:"factor_delta_p50"`
+	FactorDeltaP95        float64 `json:"factor_delta_p95"`
+	FactorDeltaP99        float64 `json:"factor_delta_p99"`
+}
+
 type RollbackResponse struct {
 	Env          string     `json:"env"`
 	PreviousHash string     `json:"previous_hash"`

@@ -43,6 +43,9 @@ type Deps struct {
 	// BusinessStats carries the read dependency for ADR-0010's
 	// GET /env/{env}/business-stats. nil disables the route.
 	BusinessStats *BusinessStatsDeps
+	// ShadowStats carries the read dependency for ADR-0013's
+	// GET /shadow-stats. nil disables the route.
+	ShadowStats *ShadowStatsDeps
 }
 
 // NewRouter returns an http.Handler serving the substrate-only HTTP
@@ -87,6 +90,9 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	}
 	if deps.BusinessStats != nil {
 		mux.Handle("/env/{env}/business-stats", chain(deps, "/env/{env}/business-stats", BusinessStats(*deps.BusinessStats)))
+	}
+	if deps.ShadowStats != nil {
+		mux.Handle("/shadow-stats", chain(deps, "/shadow-stats", ShadowStats(*deps.ShadowStats)))
 	}
 	return mux
 }
