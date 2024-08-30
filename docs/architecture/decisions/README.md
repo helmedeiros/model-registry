@@ -30,3 +30,4 @@ NNNN-short-decision-name.md
 | [0009](0009-challenger-lifecycle.md) | Challenger lifecycle (registry side) | ✅ Accepted |
 | [0010](0010-business-stats.md) | Business-outcome statistics endpoint | ✅ Accepted |
 | [0011](0011-rule-provenance.md) | Rule-level provenance metadata | ✅ Accepted |
+| [0012](0012-challenger-data-plane-push.md) | Challenger data-plane push — rolling deployer reaches markup-svc's shadow admin surface | ✅ Accepted |

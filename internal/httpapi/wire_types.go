@@ -204,8 +204,9 @@ type RejectRequest struct {
 }
 
 type RejectResponse struct {
-	Env          string `json:"env"`
-	RejectedHash string `json:"rejected_hash,omitempty"`
+	Env          string     `json:"env"`
+	RejectedHash string     `json:"rejected_hash,omitempty"`
+	Deploy       DeployView `json:"deploy"`
 }
 
 // --- business-stats ---

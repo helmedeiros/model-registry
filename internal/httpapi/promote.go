@@ -235,11 +235,13 @@ func roleHashOrEmpty(r *envstate.Role) string {
 	return string(r.Hash)
 }
 
-// runChallengerPromote sets the challenger role on the env so markup-
-// svc (when it implements shadow mode per its own Iteration 5) can
-// load the bytes from the registry's substrate. The registry does NOT
-// roll-out to the data plane today — challenger is metadata-only until
-// the shadow Decider ships in markup-svc.
+// runChallengerPromote sets the challenger role on the env, records
+// the audit entry, and fans the bytes out to markup-svc's
+// /admin/load-challenger across all instances configured for the env.
+// Push failure does NOT roll back the envstate write — the
+// challenger is metadata-class and operators can retry the push
+// without re-running envstate semantics. The push result surfaces
+// via the response's Deploy block + a per-outcome counter label.
 func (deps PromoteDeps) runChallengerPromote(ctx context.Context, w http.ResponseWriter, req PromoteRequest) {
 	hash := store.Hash(req.Hash)
 	bundle, err := deps.Artifacts.GetBundle(ctx, hash)
@@ -259,6 +261,25 @@ func (deps PromoteDeps) runChallengerPromote(ctx context.Context, w http.Respons
 		return
 	}
 
+	source, sourceCT, err := deps.Artifacts.GetMember(ctx, hash, store.MemberSource)
+	if err != nil {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "substrate_error")
+		writeError(w, http.StatusInternalServerError, "source_lookup_failed")
+		return
+	}
+
+	targets, err := deps.Discovery.Instances(ctx, req.Env)
+	if errors.Is(err, instances.ErrNoInstances) {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "invalid_env")
+		writeError(w, http.StatusBadRequest, "invalid_env")
+		return
+	}
+	if err != nil {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "discovery_error")
+		writeError(w, http.StatusInternalServerError, "discovery_failed")
+		return
+	}
+
 	commitCtx, commitSpan := startChildSpan(ctx, "registry.challenger.commit_state")
 	err = deps.EnvState.PromoteChallenger(commitCtx, req.Env, hash, req.Operator, req.Reason)
 	commitSpan.End()
@@ -269,7 +290,7 @@ func (deps PromoteDeps) runChallengerPromote(ctx context.Context, w http.Respons
 	}
 
 	auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
-	if err := deps.recordPromoteAction(auditCtx, req, hash, "promote_challenger"); err != nil {
+	if err := deps.recordPromoteAction(auditCtx, req, hash, "promote_challenger", "env/"+req.Env+"/challenger"); err != nil {
 		auditSpan.RecordError(err)
 		logInfoWithTrace(deps.Logger, auditCtx, "registry.audit.write_failed", map[string]any{
 			"action":        "promote_challenger",
@@ -281,22 +302,45 @@ func (deps PromoteDeps) runChallengerPromote(ctx context.Context, w http.Respons
 	}
 	auditSpan.End()
 
-	deps.Metrics.RecordPromotion(req.Env, req.Role, "ok")
+	pushCtx, pushSpan := startChildSpan(ctx, "registry.challenger.fan_out_push")
+	deployResult, _ := deps.Deployer.DeployChallenger(pushCtx, targets, deployer.Body{Bytes: source, ContentType: string(sourceCT)})
+	pushSpan.End()
+
+	deps.Metrics.RecordPromotion(req.Env, req.Role, outcomeFromChallengerDeploy(deployResult))
 	writeJSON(w, http.StatusOK, PromoteResponse{
 		Env:     req.Env,
 		NewHash: req.Hash,
+		Deploy:  deployView(deployResult),
 	})
 }
 
+// outcomeFromChallengerDeploy maps the rolling deployer's outcome to
+// the registry_promotions_total{outcome} label space. Distinct from
+// the champion outcome map because partial / failed do NOT roll back
+// envstate for challenger; the operator's audit is "envstate wrote +
+// push <outcome>".
+func outcomeFromChallengerDeploy(r deployer.DeployResult) string {
+	switch r.Outcome {
+	case deployer.OutcomeOK:
+		return "ok"
+	case deployer.OutcomePartial:
+		return "challenger_partial"
+	case deployer.OutcomeDiagnoseRejected:
+		return "diagnose_rejected"
+	default:
+		return "challenger_failed"
+	}
+}
+
 func (deps PromoteDeps) recordPromote(ctx context.Context, req PromoteRequest, hash store.Hash) error {
-	return deps.recordPromoteAction(ctx, req, hash, "promote")
+	return deps.recordPromoteAction(ctx, req, hash, "promote", "env/"+req.Env+"/champion")
 }
 
 func (deps PromoteDeps) recordPromoteRejected(ctx context.Context, req PromoteRequest, hash store.Hash) error {
-	return deps.recordPromoteAction(ctx, req, hash, "promote_rejected")
+	return deps.recordPromoteAction(ctx, req, hash, "promote_rejected", "env/"+req.Env+"/champion")
 }
 
-func (deps PromoteDeps) recordPromoteAction(ctx context.Context, req PromoteRequest, hash store.Hash, action string) error {
+func (deps PromoteDeps) recordPromoteAction(ctx context.Context, req PromoteRequest, hash store.Hash, action, target string) error {
 	id, err := deps.ULID.New()
 	if err != nil {
 		return err
@@ -305,7 +349,7 @@ func (deps PromoteDeps) recordPromoteAction(ctx context.Context, req PromoteRequ
 		ID:           id,
 		Operator:     req.Operator,
 		Action:       action,
-		Target:       "env/" + req.Env + "/champion",
+		Target:       target,
 		ArtifactHash: hash,
 		Reason:       req.Reason,
 		At:           deps.Now(),

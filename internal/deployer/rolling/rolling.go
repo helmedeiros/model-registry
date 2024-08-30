@@ -167,16 +167,20 @@ func (d *Deployer) deployOne(ctx context.Context, target instances.Instance, bod
 }
 
 func (d *Deployer) postReload(ctx context.Context, target instances.Instance, body deployer.Body) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.URL+"/admin/reload", bytes.NewReader(body.Bytes))
+	return d.postBody(ctx, target.URL+"/admin/reload", body)
+}
+
+func (d *Deployer) postBody(ctx context.Context, url string, body deployer.Body) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body.Bytes))
 	if err != nil {
-		return fmt.Errorf("build reload request: %w", err)
+		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", body.ContentType)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("post /admin/reload: %w", err)
+		return fmt.Errorf("post %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
@@ -186,9 +190,128 @@ func (d *Deployer) postReload(ctx context.Context, target instances.Instance, bo
 				return &diagnoseRejectedErr{details: details}
 			}
 		}
-		return fmt.Errorf("/admin/reload %s: %s", resp.Status, string(b))
+		return fmt.Errorf("%s %s: %s", url, resp.Status, string(b))
 	}
 	return nil
+}
+
+// DeployChallenger pushes the body to each target's
+// /admin/load-challenger endpoint. Unlike Deploy it does NOT short-
+// circuit on Diagnose rejection (markup-svc's challenger reload uses
+// the same Diagnose pipeline as champion reload, but failure on one
+// instance does not predict success on another for the metadata-class
+// challenger lifecycle — the registry still wants to know which
+// instances accepted the push). It also does not poll /readyz: the
+// challenger swap is metadata-only on the markup-svc side, no
+// rolling-restart equivalent.
+func (d *Deployer) DeployChallenger(ctx context.Context, targets []instances.Instance, body deployer.Body) (deployer.DeployResult, error) {
+	if len(targets) == 0 {
+		return deployer.DeployResult{}, deployer.ErrNoTargets
+	}
+	results := make([]deployer.InstanceResult, 0, len(targets))
+	for _, target := range targets {
+		results = append(results, d.challengerPushOne(ctx, target, body))
+	}
+	return deployer.DeployResult{
+		Instances: results,
+		Outcome:   deployer.SummariseChallengerOutcome(results),
+	}, nil
+}
+
+// ClearChallenger sends DELETE /admin/challenger to every target.
+// Idempotent on the markup-svc side.
+func (d *Deployer) ClearChallenger(ctx context.Context, targets []instances.Instance) (deployer.DeployResult, error) {
+	if len(targets) == 0 {
+		return deployer.DeployResult{}, deployer.ErrNoTargets
+	}
+	results := make([]deployer.InstanceResult, 0, len(targets))
+	for _, target := range targets {
+		results = append(results, d.challengerClearOne(ctx, target))
+	}
+	return deployer.DeployResult{
+		Instances: results,
+		Outcome:   deployer.SummariseChallengerOutcome(results),
+	}, nil
+}
+
+func (d *Deployer) challengerPushOne(ctx context.Context, target instances.Instance, body deployer.Body) deployer.InstanceResult {
+	tracer := otel.Tracer(tracerName)
+	ctx, span := tracer.Start(ctx, "registry.deploy.challenger_push",
+		oteltrace.WithSpanKind(oteltrace.SpanKindClient),
+		oteltrace.WithAttributes(
+			attribute.String("instance.url", target.URL),
+			attribute.String("instance.env", target.Env),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+	pushCtx, cancel := context.WithTimeout(ctx, d.instanceTimeout)
+	defer cancel()
+
+	if err := d.postBody(pushCtx, target.URL+"/admin/load-challenger", body); err != nil {
+		var dre *diagnoseRejectedErr
+		if errors.As(err, &dre) {
+			span.SetAttributes(attribute.String("diagnose.verdict", "rejected"))
+			span.SetStatus(codes.Error, "diagnose rejected")
+			return deployer.InstanceResult{
+				URL:             target.URL,
+				Status:          deployer.StatusDiagnoseRejected,
+				Duration:        time.Since(start),
+				Error:           err.Error(),
+				DiagnoseDetails: dre.details,
+			}
+		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "challenger push failed")
+		return deployer.InstanceResult{
+			URL:      target.URL,
+			Status:   deployer.StatusFailed,
+			Duration: time.Since(start),
+			Error:    err.Error(),
+		}
+	}
+	return deployer.InstanceResult{
+		URL:      target.URL,
+		Status:   deployer.StatusDeployed,
+		Duration: time.Since(start),
+	}
+}
+
+func (d *Deployer) challengerClearOne(ctx context.Context, target instances.Instance) deployer.InstanceResult {
+	tracer := otel.Tracer(tracerName)
+	ctx, span := tracer.Start(ctx, "registry.deploy.challenger_clear",
+		oteltrace.WithSpanKind(oteltrace.SpanKindClient),
+		oteltrace.WithAttributes(
+			attribute.String("instance.url", target.URL),
+			attribute.String("instance.env", target.Env),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+	clearCtx, cancel := context.WithTimeout(ctx, d.instanceTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(clearCtx, http.MethodDelete, target.URL+"/admin/challenger", nil)
+	if err != nil {
+		span.RecordError(err)
+		return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusFailed, Duration: time.Since(start), Error: err.Error()}
+	}
+	otel.GetTextMapPropagator().Inject(clearCtx, propagation.HeaderCarrier(req.Header))
+	resp, err := d.client.Do(req)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "challenger clear failed")
+		return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusFailed, Duration: time.Since(start), Error: err.Error()}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		span.SetStatus(codes.Error, "challenger clear non-204")
+		return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusFailed, Duration: time.Since(start), Error: fmt.Sprintf("DELETE /admin/challenger %s: %s", resp.Status, string(b))}
+	}
+	return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusDeployed, Duration: time.Since(start)}
 }
 
 // reloadRejectBody mirrors markup-svc/ADR-0026's reject envelope. The

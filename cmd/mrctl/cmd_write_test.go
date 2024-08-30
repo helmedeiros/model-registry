@@ -54,6 +54,20 @@ func (s autoOKDeployer) Deploy(_ context.Context, targets []instances.Instance, 
 	return out, nil
 }
 
+func (s autoOKDeployer) DeployChallenger(ctx context.Context, targets []instances.Instance, body deployer.Body) (deployer.DeployResult, error) {
+	return s.Deploy(ctx, targets, body)
+}
+
+func (s autoOKDeployer) ClearChallenger(_ context.Context, targets []instances.Instance) (deployer.DeployResult, error) {
+	out := deployer.DeployResult{Outcome: deployer.OutcomeOK}
+	for _, t := range targets {
+		out.Instances = append(out.Instances, deployer.InstanceResult{
+			URL: t.URL, Status: deployer.StatusDeployed, Duration: 5 * time.Millisecond,
+		})
+	}
+	return out, nil
+}
+
 type stubDiscovery struct {
 	targets []instances.Instance
 	err     error

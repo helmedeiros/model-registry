@@ -13,6 +13,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
 	"github.com/helmedeiros/model-registry/internal/envstate/memstate"
 	"github.com/helmedeiros/model-registry/internal/httpapi"
+	"github.com/helmedeiros/model-registry/internal/instances"
 )
 
 func newRejectDeps(t *testing.T) (httpapi.RejectDeps, *memstate.Store, audit.Reader) {
@@ -69,6 +70,28 @@ func TestRejectNoChallengerReturns400(t *testing.T) {
 	}
 	if reason := bodyReason(t, rec.Body); reason != "no_challenger" {
 		t.Fatalf("reason=%q want no_challenger", reason)
+	}
+}
+
+func TestRejectFansOutClearChallengerWhenDeployerWired(t *testing.T) {
+	deps, envState, _ := newRejectDeps(t)
+	if err := envState.PromoteChallenger(context.Background(), "production", "h1", "alice", "shadow"); err != nil {
+		t.Fatal(err)
+	}
+	deps.Discovery = stubDiscovery{targets: []instances.Instance{{URL: "http://markup-svc-1:8080", Env: "production"}}}
+	deps.Deployer = stubDeployer{clearOut: okResult("http://markup-svc-1:8080")}
+
+	body, _ := json.Marshal(httpapi.RejectRequest{Env: "production", Operator: "alice", Reason: "divergence"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/reject", bytes.NewReader(body))
+	httpapi.Reject(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp httpapi.RejectResponse
+	_ = json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Deploy.Outcome != "ok" || len(resp.Deploy.Instances) != 1 {
+		t.Fatalf("clear-challenger deploy block missing: %+v", resp.Deploy)
 	}
 }
 

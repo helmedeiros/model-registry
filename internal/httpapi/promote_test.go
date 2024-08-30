@@ -35,12 +35,24 @@ func (s stubDiscovery) Instances(_ context.Context, _ string) ([]instances.Insta
 }
 
 type stubDeployer struct {
-	out deployer.DeployResult
-	err error
+	out             deployer.DeployResult
+	err             error
+	challengerOut   deployer.DeployResult
+	challengerErr   error
+	clearOut        deployer.DeployResult
+	clearErr        error
 }
 
 func (s stubDeployer) Deploy(_ context.Context, _ []instances.Instance, _ deployer.Body) (deployer.DeployResult, error) {
 	return s.out, s.err
+}
+
+func (s stubDeployer) DeployChallenger(_ context.Context, _ []instances.Instance, _ deployer.Body) (deployer.DeployResult, error) {
+	return s.challengerOut, s.challengerErr
+}
+
+func (s stubDeployer) ClearChallenger(_ context.Context, _ []instances.Instance) (deployer.DeployResult, error) {
+	return s.clearOut, s.clearErr
 }
 
 func okResult(urls ...string) deployer.DeployResult {
@@ -262,6 +274,7 @@ func TestPromoteNoInstancesReturns400InvalidEnv(t *testing.T) {
 
 func TestPromoteChallengerRoleSetsStateAndRecordsAudit(t *testing.T) {
 	deps, st, envState, au, _ := newPromoteDeps(t, okResult("http://markup-svc-1:8080"))
+	deps.Deployer = stubDeployer{challengerOut: okResult("http://markup-svc-1:8080")}
 	h := putRule(t, st, []byte("alpha,rule,1.0,1\n"))
 
 	rec := httptest.NewRecorder()
@@ -282,6 +295,45 @@ func TestPromoteChallengerRoleSetsStateAndRecordsAudit(t *testing.T) {
 	page, _ := au.List(context.Background(), audit.ListOptions{})
 	if len(page.Items) != 1 || page.Items[0].Action != "promote_challenger" {
 		t.Fatalf("audit: %+v", page.Items)
+	}
+	var resp httpapi.PromoteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Deploy.Outcome != "ok" || len(resp.Deploy.Instances) != 1 {
+		t.Fatalf("Deploy block missing: %+v", resp.Deploy)
+	}
+}
+
+func TestPromoteChallengerPushFailureDoesNotRollBackEnvstate(t *testing.T) {
+	deps, st, envState, _, _ := newPromoteDeps(t, okResult("http://markup-svc-1:8080"))
+	failed := deployer.DeployResult{
+		Outcome: deployer.OutcomeFailed,
+		Instances: []deployer.InstanceResult{
+			{URL: "http://markup-svc-1:8080", Status: deployer.StatusFailed, Error: "connection refused"},
+		},
+	}
+	deps.Deployer = stubDeployer{challengerOut: failed}
+	h := putRule(t, st, []byte("alpha,rule,1.0,1\n"))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/promote", promoteBody(t, httpapi.PromoteRequest{
+		Hash: string(h), Env: "production", Role: "challenger", Operator: "alice", Reason: "shadow trial",
+	}))
+	httpapi.Promote(deps).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("challenger promote should return 200 even on push failure; got %d", rec.Code)
+	}
+	state, _ := envState.Get(context.Background(), "production")
+	if state.Challenger == nil || state.Challenger.Hash != h {
+		t.Fatalf("envstate rolled back on push failure (must not): %+v", state.Challenger)
+	}
+	var resp httpapi.PromoteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Deploy.Outcome != "failed" {
+		t.Fatalf("Deploy.Outcome=%s want failed", resp.Deploy.Outcome)
 	}
 }
 

@@ -8,17 +8,26 @@ import (
 	"time"
 
 	"github.com/helmedeiros/model-registry/internal/audit"
+	"github.com/helmedeiros/model-registry/internal/deployer"
 	"github.com/helmedeiros/model-registry/internal/envstate"
+	"github.com/helmedeiros/model-registry/internal/instances"
 	"github.com/helmedeiros/model-registry/internal/store"
 )
 
 type RejectDeps struct {
-	EnvState envstate.Store
-	Audit    audit.Writer
-	ULID     ULIDSource
-	Logger   AccessSink
-	Now      func() time.Time
-	Metrics  RejectMetrics
+	EnvState  envstate.Store
+	Audit     audit.Writer
+	ULID      ULIDSource
+	Logger    AccessSink
+	Now       func() time.Time
+	Metrics   RejectMetrics
+	// Discovery + Deployer are optional. When both are set, /reject
+	// fans out DELETE /admin/challenger to each target after the
+	// envstate clear + audit. Push failure does NOT roll back the
+	// envstate clear; the operator sees the partial outcome via the
+	// response Deploy block + the per-outcome metric label.
+	Discovery instances.Discovery
+	Deployer  deployer.Deployer
 }
 
 type RejectMetrics interface {
@@ -97,12 +106,37 @@ func Reject(deps RejectDeps) http.Handler {
 			})
 		}
 
-		deps.Metrics.RecordReject(req.Env, "ok")
+		clearResult, outcome := deps.fanOutClear(ctx, req.Env)
+		deps.Metrics.RecordReject(req.Env, outcome)
 		writeJSON(w, http.StatusOK, RejectResponse{
 			Env:          req.Env,
 			RejectedHash: previousHash,
+			Deploy:       deployView(clearResult),
 		})
 	})
+}
+
+func (deps RejectDeps) fanOutClear(ctx context.Context, env string) (deployer.DeployResult, string) {
+	if deps.Discovery == nil || deps.Deployer == nil {
+		return deployer.DeployResult{}, "ok"
+	}
+	targets, err := deps.Discovery.Instances(ctx, env)
+	if err != nil {
+		logInfoWithTrace(deps.Logger, ctx, "registry.reject.discovery_failed", map[string]any{
+			"env":   env,
+			"error": err.Error(),
+		})
+		return deployer.DeployResult{Outcome: deployer.OutcomeFailed}, "discovery_error"
+	}
+	res, _ := deps.Deployer.ClearChallenger(ctx, targets)
+	switch res.Outcome {
+	case deployer.OutcomeOK:
+		return res, "ok"
+	case deployer.OutcomePartial:
+		return res, "challenger_partial"
+	default:
+		return res, "challenger_failed"
+	}
 }
 
 func (deps RejectDeps) recordReject(ctx context.Context, req RejectRequest) error {
