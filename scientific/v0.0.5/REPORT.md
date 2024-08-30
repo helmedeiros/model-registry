@@ -2,9 +2,7 @@
 
 v0.0.5 closes monetization gaps #1-6 on top of v0.0.4: pre-promote Diagnose gate (ADR-0006), post-promote canary auto-rollback (ADR-0007), per-env write rate-limit (ADR-0008), challenger lifecycle (ADR-0009), business-outcome stats endpoint (ADR-0010), rule provenance + diff (ADR-0011). Every chunk added middleware to the /promote and /rollback hot paths; this report pins the v0.0.5 measurement set on top of v0.0.4's. Per the ADR-0012 protocol, every bar below is pre-registered BEFORE measurement; bars never move; honest framing.
 
-This commit registers the bar. Measured numbers land in a follow-up commit after the bench has been run.
-
-## Pre-registered bars (status: pending)
+## Pre-registered bars (status: measured)
 
 | Benchmark | Bar | Layer | Reference | Status |
 |-----------|-----|-------|-----------|--------|
@@ -20,9 +18,29 @@ The bar is the v0.0.5 successor of v0.0.4's `BenchmarkConcurrentOperatorAPI_10Co
 - Each round fans out 50 envs (production-0 … production-49) so envstate locking happens per-env, not globally. Per-round latencies are recorded on each goroutine; p50/p95/p99/p999 reported via `b.ReportMetric`. The p99 + p999 are also gated via `b.Errorf` so a regression past the bar fails the bench instead of silently passing.
 - Per-round latency includes goroutine-stack and httptest scaffold allocation (~145 KB / round at 50-concurrent). This is intrinsic to concurrent load simulation but means the timed numbers include goroutine scheduling overhead in addition to handler chain cost. `b.ReportAllocs()` is called so allocs/op is surfaced.
 
-## Measured numbers — HTTP handler under sustained load
+## Measured numbers — HTTP handler under sustained load (Apple M4, stubbed deployer, memstate substrate)
 
-Pending. Filled in a follow-up commit after running.
+Three consecutive runs of `go test -count=3 -run NONE -bench BenchmarkSustainedLoad_50Concurrent -benchmem -benchtime=100x ./internal/httpapi/`. Numbers below are the three-run medians.
+
+| Statistic | Measured (median of 3 runs) | Bar | Margin |
+|-----------|------|-----|--------|
+| p50 | 200 µs | (no bar) | — |
+| p95 | 679 µs | (no bar) | — |
+| p99 | 842 µs | ≤ 50 ms | ~59× under bar |
+| p999 | 983 µs | ≤ 100 ms | ~102× under bar |
+| allocs / round | 2,320 | (informational) | — |
+| heap / round | 469 KB | (informational) | — |
+
+The bench `b.Errorf` gate did not fire in any of the three runs.
+
+### Cross-version comparison (v0.0.4 → v0.0.5)
+
+v0.0.4's `BenchmarkConcurrentOperatorAPI_10Concurrent` measured 3.99 ms p99 at 10-concurrent against fsstate (WAL-serialised). v0.0.5's `BenchmarkSustainedLoad_50Concurrent` measures 842 µs p99 at 50-concurrent against memstate (no WAL). These are not directly comparable — different substrates, different concurrency, different post-ADR surface. What they bracket:
+
+- v0.0.4 with WAL: 3.99 ms p99 at 10-concurrent.
+- v0.0.5 without WAL: 842 µs p99 at 50-concurrent.
+
+The drop in absolute p99 is dominated by the substrate change (memstate vs fsstate WAL), not by an observability reduction. The honest claim from these two numbers: the ADR-0006-0011 middleware chunks did not push the handler+observability chain over the bar at 50-concurrent in-process load. They do NOT prove anything about live-stack production behaviour under WAL serialisation + real OTLP export + real network.
 
 ## What this proves and what it does not
 
