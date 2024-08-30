@@ -53,7 +53,10 @@ func TestPromReaderAggregatesShadowMetrics(t *testing.T) {
 		{`eval_errors_total`, scalar(0.02)},
 		{`histogram_quantile(0.50`, scalar(0.005)},
 		{`histogram_quantile(0.95`, scalar(0.03)},
-		{`histogram_quantile(0.99`, scalar(0.08)},
+		{`factor_delta_bucket`, scalar(0.08)},
+		{`sampled="true"`, scalar(80)},
+		{`sampled="false"`, scalar(20)},
+		{`decide_duration_seconds_bucket`, scalar(0.0015)},
 	})
 	defer srv.Close()
 	r := shadowstats.NewPromReader(srv.URL, shadowstats.WithPromClient(srv.Client()))
@@ -67,8 +70,11 @@ func TestPromReaderAggregatesShadowMetrics(t *testing.T) {
 	if got.AgreementSamples != 30000 {
 		t.Fatalf("samples=%v want 30000", got.AgreementSamples)
 	}
-	if got.FactorDeltaP99 != 0.08 {
-		t.Fatalf("p99=%v want 0.08", got.FactorDeltaP99)
+	if got.EffectiveSampleRate != 0.8 {
+		t.Fatalf("effective_sample_rate=%v want 0.8 (80/(80+20))", got.EffectiveSampleRate)
+	}
+	if got.ChallengerLatencyP99 != 0.0015 {
+		t.Fatalf("challenger_latency_p99=%v want 0.0015", got.ChallengerLatencyP99)
 	}
 }
 

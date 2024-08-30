@@ -250,6 +250,10 @@ type ShadowStatsView struct {
 	FactorDeltaP50        float64 `json:"factor_delta_p50"`
 	FactorDeltaP95        float64 `json:"factor_delta_p95"`
 	FactorDeltaP99        float64 `json:"factor_delta_p99"`
+	EffectiveSampleRate   float64 `json:"effective_sample_rate"`
+	ChallengerLatencyP50  float64 `json:"challenger_latency_p50"`
+	ChallengerLatencyP95  float64 `json:"challenger_latency_p95"`
+	ChallengerLatencyP99  float64 `json:"challenger_latency_p99"`
 }
 
 type RollbackResponse struct {

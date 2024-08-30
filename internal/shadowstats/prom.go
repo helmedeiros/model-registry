@@ -44,11 +44,13 @@ func (p *PromReader) Stats(ctx context.Context, since time.Duration) (Stats, err
 	var (
 		agreeTrue, agreeFalse                   float64
 		samples                                  float64
+		sampledTrue, sampledFalse                float64
 		champOnly, challOnly, timeouts, errs    float64
 		p50, p95, p99                            float64
+		latP50, latP95, latP99                   float64
 	)
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(10)
+	g.SetLimit(14)
 	g.Go(func() (err error) {
 		agreeTrue, err = p.scalar(gctx, fmt.Sprintf(`sum(rate(markup_challenger_agreement_total{agree="true"}[%s]))`, w))
 		return
@@ -89,6 +91,26 @@ func (p *PromReader) Stats(ctx context.Context, since time.Duration) (Stats, err
 		p99, err = p.scalar(gctx, fmt.Sprintf(`histogram_quantile(0.99, sum by (le) (rate(markup_challenger_factor_delta_bucket[%s])))`, w))
 		return
 	})
+	g.Go(func() (err error) {
+		sampledTrue, err = p.scalar(gctx, fmt.Sprintf(`sum(rate(markup_challenger_sampled_total{sampled="true"}[%s]))`, w))
+		return
+	})
+	g.Go(func() (err error) {
+		sampledFalse, err = p.scalar(gctx, fmt.Sprintf(`sum(rate(markup_challenger_sampled_total{sampled="false"}[%s]))`, w))
+		return
+	})
+	g.Go(func() (err error) {
+		latP50, err = p.scalar(gctx, fmt.Sprintf(`histogram_quantile(0.50, sum by (le) (rate(markup_challenger_decide_duration_seconds_bucket[%s])))`, w))
+		return
+	})
+	g.Go(func() (err error) {
+		latP95, err = p.scalar(gctx, fmt.Sprintf(`histogram_quantile(0.95, sum by (le) (rate(markup_challenger_decide_duration_seconds_bucket[%s])))`, w))
+		return
+	})
+	g.Go(func() (err error) {
+		latP99, err = p.scalar(gctx, fmt.Sprintf(`histogram_quantile(0.99, sum by (le) (rate(markup_challenger_decide_duration_seconds_bucket[%s])))`, w))
+		return
+	})
 	if err := g.Wait(); err != nil {
 		return out, err
 	}
@@ -104,6 +126,12 @@ func (p *PromReader) Stats(ctx context.Context, since time.Duration) (Stats, err
 	out.FactorDeltaP50 = p50
 	out.FactorDeltaP95 = p95
 	out.FactorDeltaP99 = p99
+	if sampledTotal := sampledTrue + sampledFalse; sampledTotal > 0 {
+		out.EffectiveSampleRate = sampledTrue / sampledTotal
+	}
+	out.ChallengerLatencyP50 = latP50
+	out.ChallengerLatencyP95 = latP95
+	out.ChallengerLatencyP99 = latP99
 	return out, nil
 }
 

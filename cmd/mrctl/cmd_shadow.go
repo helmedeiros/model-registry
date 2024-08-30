@@ -35,10 +35,12 @@ func runShadow(ctx context.Context, args []string, stdout, stderr io.Writer, c *
 	if common.jsonOut {
 		return emitJSON(stdout, stderr, view)
 	}
-	fmt.Fprintf(stdout, "since:           %s\n", view.Since)
-	fmt.Fprintf(stdout, "agreement:       %.4f over %.0f samples\n", view.AgreementRate, view.AgreementSamples)
-	fmt.Fprintf(stdout, "one-sided:       champion=%.4f rps  challenger=%.4f rps\n", view.OneSidedChampionRPS, view.OneSidedChallengerRPS)
-	fmt.Fprintf(stdout, "eval:            timeout=%.4f rps  error=%.4f rps\n", view.TimeoutRPS, view.ErrorRPS)
-	fmt.Fprintf(stdout, "factor delta:    p50=%.4f  p95=%.4f  p99=%.4f\n", view.FactorDeltaP50, view.FactorDeltaP95, view.FactorDeltaP99)
+	fmt.Fprintf(stdout, "since:              %s\n", view.Since)
+	fmt.Fprintf(stdout, "effective sample:   %.4f (1.0=every challenged /decide; cross-reference agreement)\n", view.EffectiveSampleRate)
+	fmt.Fprintf(stdout, "agreement:          %.4f over %.0f samples\n", view.AgreementRate, view.AgreementSamples)
+	fmt.Fprintf(stdout, "one-sided:          champion=%.4f rps  challenger=%.4f rps\n", view.OneSidedChampionRPS, view.OneSidedChallengerRPS)
+	fmt.Fprintf(stdout, "eval:               timeout=%.4f rps  error=%.4f rps\n", view.TimeoutRPS, view.ErrorRPS)
+	fmt.Fprintf(stdout, "factor delta:       p50=%.4f  p95=%.4f  p99=%.4f\n", view.FactorDeltaP50, view.FactorDeltaP95, view.FactorDeltaP99)
+	fmt.Fprintf(stdout, "challenger latency: p50=%.6fs  p95=%.6fs  p99=%.6fs\n", view.ChallengerLatencyP50, view.ChallengerLatencyP95, view.ChallengerLatencyP99)
 	return 0
 }

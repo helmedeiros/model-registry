@@ -42,15 +42,19 @@ func ShadowStats(deps ShadowStatsDeps) http.Handler {
 
 func toShadowStatsView(s shadowstats.Stats) ShadowStatsView {
 	return ShadowStatsView{
-		Since:                s.Since.String(),
-		AgreementRate:        s.AgreementRate,
-		AgreementSamples:     s.AgreementSamples,
-		OneSidedChampionRPS:  s.OneSidedChampionRPS,
+		Since:                 s.Since.String(),
+		AgreementRate:         s.AgreementRate,
+		AgreementSamples:      s.AgreementSamples,
+		OneSidedChampionRPS:   s.OneSidedChampionRPS,
 		OneSidedChallengerRPS: s.OneSidedChallengerRPS,
-		TimeoutRPS:           s.TimeoutRPS,
-		ErrorRPS:             s.ErrorRPS,
-		FactorDeltaP50:       s.FactorDeltaP50,
-		FactorDeltaP95:       s.FactorDeltaP95,
-		FactorDeltaP99:       s.FactorDeltaP99,
+		TimeoutRPS:            s.TimeoutRPS,
+		ErrorRPS:              s.ErrorRPS,
+		FactorDeltaP50:        s.FactorDeltaP50,
+		FactorDeltaP95:        s.FactorDeltaP95,
+		FactorDeltaP99:        s.FactorDeltaP99,
+		EffectiveSampleRate:   s.EffectiveSampleRate,
+		ChallengerLatencyP50:  s.ChallengerLatencyP50,
+		ChallengerLatencyP95:  s.ChallengerLatencyP95,
+		ChallengerLatencyP99:  s.ChallengerLatencyP99,
 	}
 }
