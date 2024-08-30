@@ -50,8 +50,8 @@ func TestNewBootstrapsAFreshRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version.txt: %v", err)
 	}
-	if string(ver) != "1\n" {
-		t.Fatalf("version.txt=%q want %q", ver, "1\n")
+	if string(ver) != "2\n" {
+		t.Fatalf("version.txt=%q want %q", ver, "2\n")
 	}
 }
 

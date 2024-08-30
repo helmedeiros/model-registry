@@ -57,6 +57,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, httpClien
 		return runReject(ctx, rest, stdout, stderr, httpClient)
 	case "stats":
 		return runStats(ctx, rest, stdout, stderr, httpClient)
+	case "diff":
+		return runDiff(ctx, rest, stdout, stderr, httpClient)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage())
 		return 0
@@ -78,6 +80,7 @@ Read subcommands (ADR-0004):
   history <env> [--limit N] [--json]           env transition history
   audit [--limit N] [--json]                   operator action log
   stats <env> [--since 5m] [--json]            business outcome metrics
+  diff <from-hash> <to-hash> [--json]          rule provenance diff between bundles
 
 Write subcommands (ADR-0005, ADR-0009):
   upload --file <path> [--snapshot <path>] [--diagnose <path>]

@@ -57,6 +57,8 @@ func RunConformance(t *testing.T, factory Factory) {
 		{"ListLimitDefaultsAndCaps", testListLimits},
 		{"ListCursorUnknownStartsFromBeginning", testListUnknownCursor},
 		{"ListTieBreaksByHashWhenCreatedAtEqual", testListTieBreaksAscending},
+		{"PutRoundTripsRuleProvenanceThroughGetBundle", testRuleProvenanceRoundTrip},
+		{"ListSurfacesRuleProvenance", testRuleProvenanceInList},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -479,4 +481,62 @@ func testListTieBreaksAscending(t *testing.T, mk func(*testing.T) store.Store) {
 	if page.Items[0].Hash != low || page.Items[1].Hash != high {
 		t.Fatalf("tie-break order broken: %s,%s want %s,%s", page.Items[0].Hash, page.Items[1].Hash, low, high)
 	}
+}
+
+func testRuleProvenanceRoundTrip(t *testing.T, mk func(*testing.T) store.Store) {
+	s := mk(t)
+	rules := []store.RuleProvenance{
+		{RuleID: "premium_uplift", Author: "alice", SourceCommitSHA: "abc1234", PRURL: "https://example.test/pr/1", Description: "weekend premium"},
+		{RuleID: "loyalty_discount", Author: "bob", SourceCommitSHA: "def5678", LastModified: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
+	}
+	h, err := s.Put(ctx(), store.PutRequest{
+		SourceBytes: []byte("source"),
+		ContentType: store.ContentTypeCSV,
+		Metadata:    store.Metadata{CreatedBy: "tester", Rules: rules},
+	})
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	got, err := s.GetBundle(ctx(), h)
+	if err != nil {
+		t.Fatalf("GetBundle: %v", err)
+	}
+	if len(got.Metadata.Rules) != 2 {
+		t.Fatalf("rules len: %d", len(got.Metadata.Rules))
+	}
+	if got.Metadata.Rules[0].RuleID != "premium_uplift" || got.Metadata.Rules[0].Author != "alice" {
+		t.Fatalf("first rule: %+v", got.Metadata.Rules[0])
+	}
+	if !got.Metadata.Rules[1].LastModified.Equal(rules[1].LastModified) {
+		t.Fatalf("last_modified lost in round-trip: %v", got.Metadata.Rules[1].LastModified)
+	}
+}
+
+func testRuleProvenanceInList(t *testing.T, mk func(*testing.T) store.Store) {
+	s := mk(t)
+	h, err := s.Put(ctx(), store.PutRequest{
+		SourceBytes: []byte("alpha"),
+		ContentType: store.ContentTypeCSV,
+		Metadata: store.Metadata{
+			CreatedBy: "tester",
+			Rules:     []store.RuleProvenance{{RuleID: "premium_uplift", Author: "alice"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	page, err := s.List(ctx(), store.ListOptions{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, item := range page.Items {
+		if item.Hash != h {
+			continue
+		}
+		if len(item.Metadata.Rules) != 1 || item.Metadata.Rules[0].RuleID != "premium_uplift" {
+			t.Fatalf("list rule provenance: %+v", item.Metadata.Rules)
+		}
+		return
+	}
+	t.Fatalf("hash %s not in list", h)
 }

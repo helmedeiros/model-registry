@@ -23,11 +23,21 @@ type ArtifactBundle struct {
 }
 
 type ArtifactMetaJSON struct {
-	CreatedAt        string `json:"created_at"`
-	CreatedBy        string `json:"created_by"`
-	SourceCommitSHA  string `json:"source_commit_sha,omitempty"`
-	Description      string `json:"description,omitempty"`
-	DerivedByVersion string `json:"derived_by_version,omitempty"`
+	CreatedAt        string               `json:"created_at"`
+	CreatedBy        string               `json:"created_by"`
+	SourceCommitSHA  string               `json:"source_commit_sha,omitempty"`
+	Description      string               `json:"description,omitempty"`
+	DerivedByVersion string               `json:"derived_by_version,omitempty"`
+	Rules            []RuleProvenanceJSON `json:"rules,omitempty"`
+}
+
+type RuleProvenanceJSON struct {
+	RuleID          string `json:"rule_id"`
+	Author          string `json:"author,omitempty"`
+	SourceCommitSHA string `json:"source_commit_sha,omitempty"`
+	PRURL           string `json:"pr_url,omitempty"`
+	Description     string `json:"description,omitempty"`
+	LastModified    string `json:"last_modified,omitempty"`
 }
 
 type ArtifactPage struct {
@@ -106,10 +116,26 @@ type UploadResponse struct {
 // stays in the public wire layer so clients do not import
 // internal/store.
 type UploadMetadata struct {
-	CreatedBy        string `json:"created_by,omitempty"`
-	Description      string `json:"description,omitempty"`
-	SourceCommitSHA  string `json:"source_commit_sha,omitempty"`
-	DerivedByVersion string `json:"derived_by_version,omitempty"`
+	CreatedBy        string               `json:"created_by,omitempty"`
+	Description      string               `json:"description,omitempty"`
+	SourceCommitSHA  string               `json:"source_commit_sha,omitempty"`
+	DerivedByVersion string               `json:"derived_by_version,omitempty"`
+	Rules            []RuleProvenanceJSON `json:"rules,omitempty"`
+}
+
+// --- artifact diff (ADR-0011) ---
+
+type ArtifactDiffView struct {
+	From     string               `json:"from"`
+	To       string               `json:"to"`
+	Added    []RuleProvenanceJSON `json:"added"`
+	Removed  []RuleProvenanceJSON `json:"removed"`
+	Modified []RuleDiffEntryView  `json:"modified"`
+}
+
+type RuleDiffEntryView struct {
+	From RuleProvenanceJSON `json:"from"`
+	To   RuleProvenanceJSON `json:"to"`
 }
 
 // --- promote (ADR-0005) ---

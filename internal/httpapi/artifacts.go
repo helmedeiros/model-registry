@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/helmedeiros/model-registry/internal/store"
 )
@@ -63,13 +62,7 @@ func toArtifactPage(p store.Page) ArtifactPage {
 			Hash:        string(s.Hash),
 			ContentType: string(s.ContentType),
 			State:       string(s.State),
-			Metadata: ArtifactMetaJSON{
-				CreatedAt:        s.Metadata.CreatedAt.UTC().Format(time.RFC3339Nano),
-				CreatedBy:        s.Metadata.CreatedBy,
-				SourceCommitSHA:  s.Metadata.SourceCommitSHA,
-				Description:      s.Metadata.Description,
-				DerivedByVersion: s.Metadata.DerivedByVersion,
-			},
+			Metadata:    toMetaJSON(s.Metadata),
 		})
 	}
 	return out

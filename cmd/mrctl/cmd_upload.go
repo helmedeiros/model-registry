@@ -85,7 +85,7 @@ func buildUploadBody(sourcePath, snapshotPath, diagnosePath string, md httpapi.U
 			return nil, "", err
 		}
 	}
-	if md != (httpapi.UploadMetadata{}) {
+	if hasUploadMetadata(md) {
 		mdBytes, err := json.Marshal(md)
 		if err != nil {
 			return nil, "", fmt.Errorf("encode metadata: %w", err)
@@ -105,6 +105,10 @@ func buildUploadBody(sourcePath, snapshotPath, diagnosePath string, md httpapi.U
 		return nil, "", fmt.Errorf("close multipart: %w", err)
 	}
 	return buf, w.FormDataContentType(), nil
+}
+
+func hasUploadMetadata(md httpapi.UploadMetadata) bool {
+	return md.CreatedBy != "" || md.Description != "" || md.SourceCommitSHA != "" || md.DerivedByVersion != "" || len(md.Rules) > 0
 }
 
 func writeFilePart(w *multipart.Writer, name, path, contentType string) error {

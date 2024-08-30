@@ -33,7 +33,7 @@ func (s *Store) List(ctx context.Context, opts store.ListOptions) (store.Page, e
 	}
 
 	q := `SELECT hash, content_type, state, created_at, created_by,
-	             source_commit_sha, description, derived_by_version
+	             source_commit_sha, description, derived_by_version, rules_json
 	      FROM artifacts WHERE 1=1`
 	args := make([]any, 0, 4)
 	if opts.State != "" {
@@ -66,13 +66,18 @@ func (s *Store) List(ctx context.Context, opts store.ListOptions) (store.Page, e
 	items := make([]store.Summary, 0, limit+1)
 	for rows.Next() {
 		var (
-			hash, ct, state, createdBy        string
-			createdAtMS                       int64
-			commitSHA, description, derivedBy sql.NullString
+			hash, ct, state, createdBy           string
+			createdAtMS                          int64
+			commitSHA, description, derivedBy    sql.NullString
+			rulesJSON                            sql.NullString
 		)
 		if err := rows.Scan(&hash, &ct, &state, &createdAtMS, &createdBy,
-			&commitSHA, &description, &derivedBy); err != nil {
+			&commitSHA, &description, &derivedBy, &rulesJSON); err != nil {
 			return store.Page{}, fmt.Errorf("fsstore: list scan: %w", err)
+		}
+		rules, err := decodeRules(rulesJSON)
+		if err != nil {
+			return store.Page{}, err
 		}
 		items = append(items, store.Summary{
 			Hash:        store.Hash(hash),
@@ -84,6 +89,7 @@ func (s *Store) List(ctx context.Context, opts store.ListOptions) (store.Page, e
 				SourceCommitSHA:  commitSHA.String,
 				Description:      description.String,
 				DerivedByVersion: derivedBy.String,
+				Rules:            rules,
 			},
 		})
 	}

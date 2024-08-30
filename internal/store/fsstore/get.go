@@ -3,6 +3,7 @@ package fsstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,24 +15,29 @@ import (
 // GetBundle implements store.Reader.
 func (s *Store) GetBundle(ctx context.Context, h store.Hash) (store.Bundle, error) {
 	var (
-		hash, contentType, state, createdBy string
-		commitSHA, description, derivedBy   sql.NullString
-		createdAtMS                         int64
-		hasSnapshot, hasDiagnose            int
+		hash, contentType, state, createdBy   string
+		commitSHA, description, derivedBy     sql.NullString
+		rulesJSON                             sql.NullString
+		createdAtMS                           int64
+		hasSnapshot, hasDiagnose              int
 	)
 	err := s.db.QueryRowContext(ctx,
 		`SELECT hash, content_type, state, created_at, created_by,
 		        source_commit_sha, description, derived_by_version,
-		        has_snapshot, has_diagnose
+		        has_snapshot, has_diagnose, rules_json
 		 FROM artifacts WHERE hash = ?`, string(h)).
 		Scan(&hash, &contentType, &state, &createdAtMS, &createdBy,
 			&commitSHA, &description, &derivedBy,
-			&hasSnapshot, &hasDiagnose)
+			&hasSnapshot, &hasDiagnose, &rulesJSON)
 	if isNoRows(err) {
 		return store.Bundle{}, store.ErrNotFound
 	}
 	if err != nil {
 		return store.Bundle{}, fmt.Errorf("fsstore: select bundle: %w", err)
+	}
+	rules, err := decodeRules(rulesJSON)
+	if err != nil {
+		return store.Bundle{}, err
 	}
 	return store.Bundle{
 		Hash:        store.Hash(hash),
@@ -43,10 +49,22 @@ func (s *Store) GetBundle(ctx context.Context, h store.Hash) (store.Bundle, erro
 			SourceCommitSHA:  commitSHA.String,
 			Description:      description.String,
 			DerivedByVersion: derivedBy.String,
+			Rules:            rules,
 		},
 		HasSnapshot: hasSnapshot == 1,
 		HasDiagnose: hasDiagnose == 1,
 	}, nil
+}
+
+func decodeRules(raw sql.NullString) ([]store.RuleProvenance, error) {
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	var rules []store.RuleProvenance
+	if err := json.Unmarshal([]byte(raw.String), &rules); err != nil {
+		return nil, fmt.Errorf("fsstore: decode rules_json: %w", err)
+	}
+	return rules, nil
 }
 
 // GetMember implements store.Reader.

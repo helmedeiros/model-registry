@@ -110,14 +110,44 @@ func toArtifactBundle(b store.Bundle) ArtifactBundle {
 		Hash:        string(b.Hash),
 		ContentType: string(b.ContentType),
 		State:       string(b.State),
-		Metadata: ArtifactMetaJSON{
-			CreatedAt:        b.Metadata.CreatedAt.UTC().Format(time.RFC3339Nano),
-			CreatedBy:        b.Metadata.CreatedBy,
-			SourceCommitSHA:  b.Metadata.SourceCommitSHA,
-			Description:      b.Metadata.Description,
-			DerivedByVersion: b.Metadata.DerivedByVersion,
-		},
+		Metadata:    toMetaJSON(b.Metadata),
 		HasSnapshot: b.HasSnapshot,
 		HasDiagnose: b.HasDiagnose,
 	}
+}
+
+func toMetaJSON(m store.Metadata) ArtifactMetaJSON {
+	return ArtifactMetaJSON{
+		CreatedAt:        m.CreatedAt.UTC().Format(time.RFC3339Nano),
+		CreatedBy:        m.CreatedBy,
+		SourceCommitSHA:  m.SourceCommitSHA,
+		Description:      m.Description,
+		DerivedByVersion: m.DerivedByVersion,
+		Rules:            toRuleProvenanceJSON(m.Rules),
+	}
+}
+
+func toRuleProvenanceJSON(rs []store.RuleProvenance) []RuleProvenanceJSON {
+	if len(rs) == 0 {
+		return nil
+	}
+	out := make([]RuleProvenanceJSON, len(rs))
+	for i, r := range rs {
+		out[i] = ruleProvenanceJSON(r)
+	}
+	return out
+}
+
+func ruleProvenanceJSON(r store.RuleProvenance) RuleProvenanceJSON {
+	view := RuleProvenanceJSON{
+		RuleID:          r.RuleID,
+		Author:          r.Author,
+		SourceCommitSHA: r.SourceCommitSHA,
+		PRURL:           r.PRURL,
+		Description:     r.Description,
+	}
+	if !r.LastModified.IsZero() {
+		view.LastModified = r.LastModified.UTC().Format(time.RFC3339Nano)
+	}
+	return view
 }

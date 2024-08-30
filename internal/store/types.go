@@ -43,11 +43,26 @@ const (
 // toolchain version that compiled a snapshot from source); the substrate
 // stores the value without interpretation.
 type Metadata struct {
-	CreatedAt        time.Time `json:"created_at"`
-	CreatedBy        string    `json:"created_by"`
-	SourceCommitSHA  string    `json:"source_commit_sha,omitempty"`
-	Description      string    `json:"description,omitempty"`
-	DerivedByVersion string    `json:"derived_by_version,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	CreatedBy        string           `json:"created_by"`
+	SourceCommitSHA  string           `json:"source_commit_sha,omitempty"`
+	Description      string           `json:"description,omitempty"`
+	DerivedByVersion string           `json:"derived_by_version,omitempty"`
+	Rules            []RuleProvenance `json:"rules,omitempty"`
+}
+
+// RuleProvenance is the per-rule attribution carried alongside the
+// bundle. The substrate stores the slice without validating that the
+// RuleIDs match anything in the source bytes — the registry remains
+// format-agnostic. The authoring pipeline is responsible for keeping
+// this slice in sync with the source.
+type RuleProvenance struct {
+	RuleID          string    `json:"rule_id"`
+	Author          string    `json:"author,omitempty"`
+	SourceCommitSHA string    `json:"source_commit_sha,omitempty"`
+	PRURL           string    `json:"pr_url,omitempty"`
+	Description     string    `json:"description,omitempty"`
+	LastModified    time.Time `json:"last_modified,omitempty"`
 }
 
 // PutRequest carries the bytes and metadata for a new artifact upload.

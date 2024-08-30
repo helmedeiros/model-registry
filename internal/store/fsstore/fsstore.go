@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -20,7 +21,7 @@ const (
 	objectsDir    = "objects"
 	metadataDB    = "metadata.db"
 	versionFile   = "version.txt"
-	schemaVersion = "1"
+	schemaVersion = "2"
 )
 
 // Store is a filesystem + SQLite backing for store.Store. Safe for
@@ -104,6 +105,13 @@ func applySchema(db *sql.DB) error {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("fsstore: apply schema: %w", err)
 	}
+	// ALTER for pre-schemaVersion=2 databases. Swallow the duplicate-
+	// column error so the migration is idempotent.
+	if _, err := db.Exec(`ALTER TABLE artifacts ADD COLUMN rules_json TEXT`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("fsstore: add rules_json column: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -134,7 +142,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
     has_snapshot       INTEGER NOT NULL,
     has_diagnose       INTEGER NOT NULL,
     deprecated_at      INTEGER,
-    deprecated_reason  TEXT
+    deprecated_reason  TEXT,
+    rules_json         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_state_created

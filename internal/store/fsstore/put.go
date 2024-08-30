@@ -60,18 +60,25 @@ func (s *Store) Put(ctx context.Context, req store.PutRequest) (store.Hash, erro
 		return "", err
 	}
 
-	// Race loser's INSERT silently dropped; their identical
-	// content-addressed bytes are already on disk.
+	var rulesJSON any
+	if len(md.Rules) > 0 {
+		raw, err := json.Marshal(md.Rules)
+		if err != nil {
+			return "", fmt.Errorf("fsstore: marshal rules: %w", err)
+		}
+		rulesJSON = string(raw)
+	}
+
 	_, err = s.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO artifacts
 			(hash, content_type, state, created_at, created_by,
 			 source_commit_sha, description, derived_by_version,
-			 has_snapshot, has_diagnose)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 has_snapshot, has_diagnose, rules_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(h), string(req.ContentType), string(store.StateStaged),
 		md.CreatedAt.UnixMilli(), md.CreatedBy,
 		nullable(md.SourceCommitSHA), nullable(md.Description), nullable(md.DerivedByVersion),
-		boolToInt(hasSnapshot), boolToInt(hasDiagnose),
+		boolToInt(hasSnapshot), boolToInt(hasDiagnose), rulesJSON,
 	)
 	if err != nil {
 		return "", fmt.Errorf("fsstore: insert artifact: %w", err)

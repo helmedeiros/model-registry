@@ -205,12 +205,12 @@ func readUploadParts(r *http.Request, maxBytes int64) (uploadParts, error) {
 		if err != nil {
 			return uploadParts{}, err
 		}
-		var md store.Metadata
-		if err := json.Unmarshal(metaBytes, &md); err != nil {
+		var wire UploadMetadata
+		if err := json.Unmarshal(metaBytes, &wire); err != nil {
 			return uploadParts{}, fmt.Errorf("invalid_metadata: %w", err)
 		}
-		parts.metadata = md
-		parts.operator = md.CreatedBy
+		parts.metadata = fromUploadMetadata(wire)
+		parts.operator = wire.CreatedBy
 	}
 	if parts.operator == "" {
 		parts.operator = "anonymous"
@@ -235,6 +235,41 @@ func readFile(fh *multipart.FileHeader, maxBytes int64) ([]byte, error) {
 		return nil, errUploadTooLarge
 	}
 	return buf, nil
+}
+
+func fromUploadMetadata(w UploadMetadata) store.Metadata {
+	md := store.Metadata{
+		CreatedBy:        w.CreatedBy,
+		Description:      w.Description,
+		SourceCommitSHA:  w.SourceCommitSHA,
+		DerivedByVersion: w.DerivedByVersion,
+	}
+	if len(w.Rules) == 0 {
+		return md
+	}
+	md.Rules = make([]store.RuleProvenance, len(w.Rules))
+	for i, r := range w.Rules {
+		md.Rules[i] = store.RuleProvenance{
+			RuleID:          r.RuleID,
+			Author:          r.Author,
+			SourceCommitSHA: r.SourceCommitSHA,
+			PRURL:           r.PRURL,
+			Description:     r.Description,
+			LastModified:    parseTimeOrZero(r.LastModified),
+		}
+	}
+	return md
+}
+
+func parseTimeOrZero(raw string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 func recordUpload(ctx context.Context, deps UploadDeps, hash store.Hash, operator string) error {

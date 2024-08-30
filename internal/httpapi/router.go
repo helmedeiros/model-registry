@@ -69,6 +69,7 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	mux.Handle("/artifacts", chain(deps, "/artifacts", Artifacts(deps.Artifacts)))
 	mux.Handle("/artifact/{hash}", chain(deps, "/artifact/{hash}", Artifact(deps.Artifacts)))
 	mux.Handle("/artifact/{hash}/{member}", chain(deps, "/artifact/{hash}/{member}", ArtifactMember(deps.Artifacts)))
+	mux.Handle("/artifact/{from}/diff/{to}", chain(deps, "/artifact/{from}/diff/{to}", Diff(deps.Artifacts)))
 	mux.Handle("/env/{env}/state", chain(deps, "/env/{env}/state", EnvState(deps.EnvState)))
 	mux.Handle("/env/{env}/history", chain(deps, "/env/{env}/history", EnvHistory(deps.EnvState)))
 	mux.Handle("/audit", chain(deps, "/audit", Audit(deps.Audit)))
