@@ -21,6 +21,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/audit/fsaudit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
+	"github.com/helmedeiros/model-registry/internal/businessstats"
 	"github.com/helmedeiros/model-registry/internal/canary"
 	"github.com/helmedeiros/model-registry/internal/config"
 	"github.com/helmedeiros/model-registry/internal/deployer/rolling"
@@ -163,6 +164,10 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	} else {
 		logger.Info("registry.promote.disabled", map[string]any{"reason": err.Error()})
 	}
+	if reader := buildBusinessStatsReader(cfg); reader != nil {
+		deps.BusinessStats = &httpapi.BusinessStatsDeps{Reader: reader}
+		logger.Info("registry.business_stats.enabled", map[string]any{"prom_url": cfg.BusinessStatsPromURL})
+	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),
 	}
@@ -241,6 +246,13 @@ func buildWriteLimiter(cfg config.Config) ratelimit.Limiter {
 		return ratelimit.NoopLimiter{}
 	}
 	return ratelimit.NewTokenBucket(cfg.WriteRateRefill, cfg.WriteRateBurst)
+}
+
+func buildBusinessStatsReader(cfg config.Config) businessstats.Reader {
+	if cfg.BusinessStatsPromURL == "" {
+		return nil
+	}
+	return businessstats.NewPromReader(cfg.BusinessStatsPromURL)
 }
 
 func buildCanarySupervisor(cfg config.Config, p *httpapi.PromoteDeps, metrics *prom.HTTPMetrics) *httpapi.CanarySupervisor {

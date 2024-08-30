@@ -31,6 +31,7 @@ type Config struct {
 	CanaryMinSamples   int
 	WriteRateRefill    time.Duration
 	WriteRateBurst     int
+	BusinessStatsPromURL string
 }
 
 const (
@@ -83,6 +84,7 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 	fs.StringVar(&writeRefillStr, "write-rate-refill", writeRefillStr, "Token-bucket refill interval per env on /promote + /rollback (Go duration). Empty/0 disables the limiter.")
 	writeBurstStr := envOr("REGISTRY_WRITE_RATE_BURST", strconv.Itoa(cfg.WriteRateBurst))
 	fs.StringVar(&writeBurstStr, "write-rate-burst", writeBurstStr, "Token-bucket burst per env on /promote + /rollback.")
+	fs.StringVar(&cfg.BusinessStatsPromURL, "business-stats-prom-url", envOr("REGISTRY_BUSINESS_STATS_PROM_URL", cfg.BusinessStatsPromURL), "Prometheus base URL for /env/<env>/business-stats. Empty = endpoint disabled.")
 	// flag.DurationVar cannot be pre-seeded from env; bind a string
 	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
 	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())

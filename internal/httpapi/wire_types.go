@@ -182,6 +182,34 @@ type RejectResponse struct {
 	RejectedHash string `json:"rejected_hash,omitempty"`
 }
 
+// --- business-stats ---
+
+type BusinessStatsView struct {
+	Env      string             `json:"env"`
+	Since    string             `json:"since"`
+	Decide   BusinessDecideView `json:"decide"`
+	Factor   BusinessFactorView `json:"factor"`
+	TopRules []BusinessRuleView `json:"top_rules"`
+}
+
+type BusinessDecideView struct {
+	OK      float64 `json:"ok"`
+	Error   float64 `json:"error"`
+	NoMatch float64 `json:"no_match"`
+	Total   float64 `json:"total"`
+}
+
+type BusinessFactorView struct {
+	P50 float64 `json:"p50"`
+	P95 float64 `json:"p95"`
+	P99 float64 `json:"p99"`
+}
+
+type BusinessRuleView struct {
+	Rule          string  `json:"rule"`
+	RatePerSecond float64 `json:"rate_per_second"`
+}
+
 type RollbackResponse struct {
 	Env          string     `json:"env"`
 	PreviousHash string     `json:"previous_hash"`

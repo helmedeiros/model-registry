@@ -40,6 +40,9 @@ type Deps struct {
 	// Reject carries the write dependencies for ADR-0009's POST
 	// /reject. nil disables the route.
 	Reject *RejectDeps
+	// BusinessStats carries the read dependency for ADR-0010's
+	// GET /env/{env}/business-stats. nil disables the route.
+	BusinessStats *BusinessStatsDeps
 }
 
 // NewRouter returns an http.Handler serving the substrate-only HTTP
@@ -80,6 +83,9 @@ func NewRouter(deps Deps, metricsHandler http.Handler) http.Handler {
 	}
 	if deps.Reject != nil {
 		mux.Handle("/reject", chain(deps, "/reject", Reject(*deps.Reject)))
+	}
+	if deps.BusinessStats != nil {
+		mux.Handle("/env/{env}/business-stats", chain(deps, "/env/{env}/business-stats", BusinessStats(*deps.BusinessStats)))
 	}
 	return mux
 }

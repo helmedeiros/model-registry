@@ -28,3 +28,4 @@ NNNN-short-decision-name.md
 | [0007](0007-post-promote-canary.md) | Post-promote canary observation + auto-rollback | ✅ Accepted |
 | [0008](0008-write-rate-limit.md) | Per-env rate limit on /promote + /rollback | ✅ Accepted |
 | [0009](0009-challenger-lifecycle.md) | Challenger lifecycle (registry side) | ✅ Accepted |
+| [0010](0010-business-stats.md) | Business-outcome statistics endpoint | ✅ Accepted |
