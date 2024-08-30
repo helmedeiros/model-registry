@@ -103,7 +103,7 @@ func postJSON(ctx context.Context, c *http.Client, base, path string, body io.Re
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		raw, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, &httpError{status: resp.StatusCode, statusText: resp.Status, body: raw}
+		return resp.StatusCode, &httpError{status: resp.StatusCode, statusText: resp.Status, body: raw, headers: resp.Header}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 		return resp.StatusCode, fmt.Errorf("decode body: %w", err)
@@ -115,6 +115,7 @@ type httpError struct {
 	status     int
 	statusText string
 	body       []byte
+	headers    http.Header
 }
 
 func (e *httpError) Error() string {

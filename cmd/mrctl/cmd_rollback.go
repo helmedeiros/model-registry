@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -36,6 +37,10 @@ func runRollback(ctx context.Context, args []string, stdout, stderr io.Writer, c
 
 	var resp httpapi.RollbackResponse
 	if _, err := postJSON(ctx, c, common.registry, "/rollback", bytes.NewReader(body), "application/json", &resp); err != nil {
+		var he *httpError
+		if errors.As(err, &he) && he.status == http.StatusTooManyRequests {
+			return renderRateLimited(stderr, "rollback", he)
+		}
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

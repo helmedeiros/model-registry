@@ -118,3 +118,41 @@ func TestLoadFromArgsInvalidShutdownTimeout(t *testing.T) {
 		t.Fatalf("expected shutdown-timeout parse error, got %v", err)
 	}
 }
+
+func TestLoadFromArgsWriteRateFlagsHonoured(t *testing.T) {
+	cfg, _, err := config.LoadFromArgs([]string{
+		"--write-rate-refill", "0s",
+		"--write-rate-burst", "0",
+	})
+	if err != nil {
+		t.Fatalf("LoadFromArgs: %v", err)
+	}
+	if cfg.WriteRateRefill != 0 || cfg.WriteRateBurst != 0 {
+		t.Fatalf("WriteRate*: refill=%s burst=%d want both zero", cfg.WriteRateRefill, cfg.WriteRateBurst)
+	}
+}
+
+func TestLoadFromArgsWriteRateBurstFromEnv(t *testing.T) {
+	t.Setenv("REGISTRY_WRITE_RATE_BURST", "5")
+	cfg, _, err := config.LoadFromArgs(nil)
+	if err != nil {
+		t.Fatalf("LoadFromArgs: %v", err)
+	}
+	if cfg.WriteRateBurst != 5 {
+		t.Fatalf("WriteRateBurst=%d want 5 from env", cfg.WriteRateBurst)
+	}
+}
+
+func TestLoadFromArgsInvalidWriteRateRefill(t *testing.T) {
+	_, _, err := config.LoadFromArgs([]string{"--write-rate-refill", "garbage"})
+	if err == nil || !strings.Contains(err.Error(), "write-rate-refill") {
+		t.Fatalf("expected write-rate-refill error, got %v", err)
+	}
+}
+
+func TestLoadFromArgsInvalidWriteRateBurst(t *testing.T) {
+	_, _, err := config.LoadFromArgs([]string{"--write-rate-burst", "garbage"})
+	if err == nil || !strings.Contains(err.Error(), "write-rate-burst") {
+		t.Fatalf("expected write-rate-burst error, got %v", err)
+	}
+}

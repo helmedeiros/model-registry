@@ -26,3 +26,4 @@ NNNN-short-decision-name.md
 | [0005](0005-champion-lifecycle-and-deployer.md) | Champion lifecycle and markup-svc deployer | ✅ Accepted |
 | [0006](0006-promotion-gates.md) | Promotion gates — Diagnose verdict short-circuits /promote with 422 | ✅ Accepted |
 | [0007](0007-post-promote-canary.md) | Post-promote canary observation + auto-rollback | ✅ Accepted |
+| [0008](0008-write-rate-limit.md) | Per-env rate limit on /promote + /rollback | ✅ Accepted |

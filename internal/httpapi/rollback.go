@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/deployer"
 	"github.com/helmedeiros/model-registry/internal/envstate"
 	"github.com/helmedeiros/model-registry/internal/instances"
+	"github.com/helmedeiros/model-registry/internal/ratelimit"
 	"github.com/helmedeiros/model-registry/internal/store"
 )
 
@@ -28,6 +31,7 @@ type RollbackDeps struct {
 	Logger    AccessSink
 	Now       func() time.Time
 	Metrics   RollbackMetrics
+	Limiter   ratelimit.Limiter
 }
 
 // Rollback returns the POST /rollback handler per ADR-0005.
@@ -83,6 +87,15 @@ func Rollback(deps RollbackDeps) http.Handler {
 			deps.Metrics.RecordRollback(req.Env, "reason_required")
 			writeError(w, http.StatusBadRequest, "reason_required")
 			return
+		}
+
+		if deps.Limiter != nil {
+			if ok, retry := deps.Limiter.Allow(req.Env); !ok {
+				deps.Metrics.RecordRollback(req.Env, "rate_limited")
+				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retry.Seconds()))))
+				writeError(w, http.StatusTooManyRequests, "rollback_rate_limited")
+				return
+			}
 		}
 
 		ctx := r.Context()

@@ -29,6 +29,8 @@ type Config struct {
 	CanaryThreshold    float64
 	CanaryPollEvery    time.Duration
 	CanaryMinSamples   int
+	WriteRateRefill    time.Duration
+	WriteRateBurst     int
 }
 
 const (
@@ -51,6 +53,8 @@ func Default() Config {
 		CanaryThreshold:  0.01,
 		CanaryPollEvery:  30 * time.Second,
 		CanaryMinSamples: 100,
+		WriteRateRefill:  10 * time.Second,
+		WriteRateBurst:   2,
 	}
 }
 
@@ -75,6 +79,10 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 	thresholdStr := envOr("REGISTRY_CANARY_THRESHOLD", "")
 	fs.StringVar(&thresholdStr, "canary-threshold", thresholdStr, "Canary error-rate threshold; rollback when observed rate exceeds this (e.g. 0.01).")
 	fs.IntVar(&cfg.CanaryMinSamples, "canary-min-samples", cfg.CanaryMinSamples, "Minimum markup_decide_total sample count in the window required to reach a non-inconclusive decision.")
+	writeRefillStr := envOr("REGISTRY_WRITE_RATE_REFILL", cfg.WriteRateRefill.String())
+	fs.StringVar(&writeRefillStr, "write-rate-refill", writeRefillStr, "Token-bucket refill interval per env on /promote + /rollback (Go duration). Empty/0 disables the limiter.")
+	writeBurstStr := envOr("REGISTRY_WRITE_RATE_BURST", strconv.Itoa(cfg.WriteRateBurst))
+	fs.StringVar(&writeBurstStr, "write-rate-burst", writeBurstStr, "Token-bucket burst per env on /promote + /rollback.")
 	// flag.DurationVar cannot be pre-seeded from env; bind a string
 	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
 	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())
@@ -109,6 +117,18 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 		}
 		cfg.CanaryThreshold = f
 	}
+
+	parsedRefill, err := time.ParseDuration(writeRefillStr)
+	if err != nil {
+		return Config{}, fs, fmt.Errorf("config: write-rate-refill %q: %w", writeRefillStr, err)
+	}
+	cfg.WriteRateRefill = parsedRefill
+
+	parsedBurst, err := strconv.Atoi(writeBurstStr)
+	if err != nil {
+		return Config{}, fs, fmt.Errorf("config: write-rate-burst %q: %w", writeBurstStr, err)
+	}
+	cfg.WriteRateBurst = parsedBurst
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fs, err

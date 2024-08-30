@@ -40,8 +40,13 @@ func runPromote(ctx context.Context, args []string, stdout, stderr io.Writer, c 
 	var resp httpapi.PromoteResponse
 	if _, err := postJSON(ctx, c, common.registry, "/promote", bytes.NewReader(body), "application/json", &resp); err != nil {
 		var he *httpError
-		if errors.As(err, &he) && he.status == http.StatusUnprocessableEntity {
-			return renderPromoteRejection(stdout, stderr, common.jsonOut, he.body)
+		if errors.As(err, &he) {
+			switch he.status {
+			case http.StatusUnprocessableEntity:
+				return renderPromoteRejection(stdout, stderr, common.jsonOut, he.body)
+			case http.StatusTooManyRequests:
+				return renderRateLimited(stderr, "promote", he)
+			}
 		}
 		fmt.Fprintln(stderr, err)
 		return 1

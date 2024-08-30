@@ -9,6 +9,8 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- ADR-0008 Accepted: Per-env rate limit on /promote + /rollback. `internal/ratelimit.TokenBucket` caps the per-env write-surface rate (default: 2-burst + 1 token every 10s, shared between promote and rollback). Denial returns `429 Too Many Requests` + `Retry-After` header + `{reason:"promote_rate_limited"}` envelope. New metric outcome `rate_limited` on `registry_promotions_total` and `registry_rollbacks_total`. mrctl detects the 429, reads `Retry-After`, and renders `<op>_rate_limited: try again in <N>s` to stderr. Opt-in via `--write-rate-refill` + `--write-rate-burst`; zero in either disables the limiter (v0.0.4 behaviour).
+
 - ADR-0007 Accepted: Post-promote canary observation + auto-rollback. `internal/canary` ships the `Decider` port + `PromDecider` adapter. Defaults: 5 min window, 1% error-rate threshold, 30 s poll interval, 100-sample floor for a non-inconclusive decision. Opt-in via `--canary-prom-url` (empty = v0.0.4 behaviour). New audit actions `canary_observed` + `auto_rollback`. New metric `registry_canary_decisions_total{env, decision}`. Detection bounded by `window`; an auto-rollback whose deploy itself fails leaves envstate uncommitted (same correctness rule as /rollback).
 
 - ADR-0006 Accepted: Promotion gates. `POST /promote` short-circuits with `422 promote_rejected` when markup-svc's Diagnose layer (ADR-0026 in that repo) rejects the rule set on the first instance. Distinct from `502 outcome=failed` (sick data plane) so operators can hop between two failure modes from one signal.

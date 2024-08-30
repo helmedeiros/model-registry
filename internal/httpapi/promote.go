@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/deployer"
 	"github.com/helmedeiros/model-registry/internal/envstate"
 	"github.com/helmedeiros/model-registry/internal/instances"
+	"github.com/helmedeiros/model-registry/internal/ratelimit"
 	"github.com/helmedeiros/model-registry/internal/store"
 )
 
@@ -36,6 +39,9 @@ type PromoteDeps struct {
 	// deploy observation window (ADR-0007); nil preserves v0.0.4
 	// behaviour.
 	Canary CanaryObserver
+	// Limiter caps the per-env /promote rate (ADR-0008). Nil = no
+	// limit (v0.0.4 behaviour).
+	Limiter ratelimit.Limiter
 }
 
 // Promote returns the POST /promote handler per ADR-0005.
@@ -59,6 +65,15 @@ func Promote(deps PromoteDeps) http.Handler {
 			deps.Metrics.RecordPromotion(req.Env, req.Role, reason)
 			writeError(w, http.StatusBadRequest, reason)
 			return
+		}
+
+		if deps.Limiter != nil {
+			if ok, retry := deps.Limiter.Allow(req.Env); !ok {
+				deps.Metrics.RecordPromotion(req.Env, req.Role, "rate_limited")
+				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(retry.Seconds()))))
+				writeError(w, http.StatusTooManyRequests, "promote_rate_limited")
+				return
+			}
 		}
 
 		switch req.Role {

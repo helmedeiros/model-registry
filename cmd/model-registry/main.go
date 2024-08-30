@@ -31,6 +31,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/instances/static"
 	"github.com/helmedeiros/model-registry/internal/observability/jsonlog"
 	"github.com/helmedeiros/model-registry/internal/observability/metrics/prom"
+	"github.com/helmedeiros/model-registry/internal/ratelimit"
 	regotel "github.com/helmedeiros/model-registry/internal/observability/otel"
 	"github.com/helmedeiros/model-registry/internal/store"
 	"github.com/helmedeiros/model-registry/internal/store/fsstore"
@@ -128,8 +129,10 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		Audit:     auditLog,
 		Upload:    &uploadDeps,
 	}
+	limiter := buildWriteLimiter(cfg)
 	if promoteDeps, err := buildPromoteDeps(cfg, st, envState, auditLog, idgen, logger); err == nil {
 		promoteDeps.Metrics = metrics
+		promoteDeps.Limiter = limiter
 		if sup := buildCanarySupervisor(cfg, promoteDeps, metrics); sup != nil {
 			promoteDeps.Canary = sup
 			logger.Info("registry.canary.enabled", map[string]any{
@@ -148,6 +151,7 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 			ULID:      promoteDeps.ULID,
 			Logger:    promoteDeps.Logger,
 			Metrics:   metrics,
+			Limiter:   limiter,
 		}
 	} else {
 		logger.Info("registry.promote.disabled", map[string]any{"reason": err.Error()})
@@ -223,6 +227,13 @@ func buildPromoteDeps(cfg config.Config, st store.Store, envState envstate.Store
 		ULID:      idgen,
 		Logger:    logger,
 	}, nil
+}
+
+func buildWriteLimiter(cfg config.Config) ratelimit.Limiter {
+	if cfg.WriteRateRefill <= 0 || cfg.WriteRateBurst <= 0 {
+		return ratelimit.NoopLimiter{}
+	}
+	return ratelimit.NewTokenBucket(cfg.WriteRateRefill, cfg.WriteRateBurst)
 }
 
 func buildCanarySupervisor(cfg config.Config, p *httpapi.PromoteDeps, metrics *prom.HTTPMetrics) *httpapi.CanarySupervisor {
