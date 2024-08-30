@@ -153,6 +153,13 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 			Metrics:   metrics,
 			Limiter:   limiter,
 		}
+		deps.Reject = &httpapi.RejectDeps{
+			EnvState: promoteDeps.EnvState,
+			Audit:    promoteDeps.Audit,
+			ULID:     promoteDeps.ULID,
+			Logger:   promoteDeps.Logger,
+			Metrics:  metrics,
+		}
 	} else {
 		logger.Info("registry.promote.disabled", map[string]any{"reason": err.Error()})
 	}

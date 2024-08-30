@@ -407,14 +407,108 @@ func (s *Store) RollbackChampion(ctx context.Context, env, operator, reason stri
 	return prior, nil
 }
 
-// PromoteChallenger implements envstate.Writer. Stubbed until ADR-0006.
-func (s *Store) PromoteChallenger(_ context.Context, _ string, _ store.Hash, _, _ string) error {
-	return envstate.ErrNotImplemented
+// PromoteChallenger implements envstate.Writer (ADR-0009).
+func (s *Store) PromoteChallenger(ctx context.Context, env string, h store.Hash, operator, reason string) error {
+	if env == "" {
+		return envstate.ErrEnvRequired
+	}
+	if h == "" {
+		return envstate.ErrHashRequired
+	}
+	if operator == "" {
+		return envstate.ErrOperatorRequired
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("fsstate: begin promote_challenger tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	nowMS, err := monotonicAtMS(ctx, tx, env, s.clock())
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO env_state(env, challenger_hash, challenger_by, challenger_at, updated_at)
+		      VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(env) DO UPDATE SET
+		     challenger_hash = excluded.challenger_hash,
+		     challenger_by   = excluded.challenger_by,
+		     challenger_at   = excluded.challenger_at,
+		     updated_at      = excluded.updated_at`,
+		env, string(h), operator, nowMS, nowMS,
+	); err != nil {
+		return fmt.Errorf("fsstate: write env_state: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO env_history(env, kind, to_hash, operator, reason, at)
+		      VALUES (?, ?, ?, ?, ?, ?)`,
+		env, string(envstate.KindChallengerPromoted), string(h), operator, reason, nowMS,
+	); err != nil {
+		return fmt.Errorf("fsstate: write env_history: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("fsstate: commit promote_challenger tx: %w", err)
+	}
+	return nil
 }
 
-// RejectChallenger implements envstate.Writer. Stubbed until ADR-0006.
-func (s *Store) RejectChallenger(_ context.Context, _ string, _, _ string) error {
-	return envstate.ErrNotImplemented
+// RejectChallenger implements envstate.Writer (ADR-0009).
+func (s *Store) RejectChallenger(ctx context.Context, env, operator, reason string) error {
+	if env == "" {
+		return envstate.ErrEnvRequired
+	}
+	if operator == "" {
+		return envstate.ErrOperatorRequired
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("fsstate: begin reject_challenger tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var current sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`SELECT challenger_hash FROM env_state WHERE env = ?`, env).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) || !current.Valid {
+			return envstate.ErrNoChallenger
+		}
+		return fmt.Errorf("fsstate: read challenger: %w", err)
+	}
+	if !current.Valid || current.String == "" {
+		return envstate.ErrNoChallenger
+	}
+
+	nowMS, err := monotonicAtMS(ctx, tx, env, s.clock())
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE env_state
+		    SET challenger_hash = NULL, challenger_by = NULL, challenger_at = NULL, updated_at = ?
+		  WHERE env = ?`, nowMS, env,
+	); err != nil {
+		return fmt.Errorf("fsstate: update env_state: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO env_history(env, kind, from_hash, operator, reason, at)
+		      VALUES (?, ?, ?, ?, ?, ?)`,
+		env, string(envstate.KindChallengerRejected), current.String, operator, reason, nowMS,
+	); err != nil {
+		return fmt.Errorf("fsstate: write env_history: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("fsstate: commit reject_challenger tx: %w", err)
+	}
+	return nil
 }
 
 func nullableString(s string) any {

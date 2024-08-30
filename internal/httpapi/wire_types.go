@@ -169,6 +169,19 @@ type RollbackRequest struct {
 	Reason   string `json:"reason"`
 }
 
+// --- reject (ADR-0009) ---
+
+type RejectRequest struct {
+	Env      string `json:"env"`
+	Operator string `json:"operator"`
+	Reason   string `json:"reason"`
+}
+
+type RejectResponse struct {
+	Env          string `json:"env"`
+	RejectedHash string `json:"rejected_hash,omitempty"`
+}
+
 type RollbackResponse struct {
 	Env          string     `json:"env"`
 	PreviousHash string     `json:"previous_hash"`

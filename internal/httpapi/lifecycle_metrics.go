@@ -37,6 +37,11 @@ type CanaryMetrics interface {
 	RecordCanary(env, decision string)
 }
 
+// RejectMetrics is defined alongside the other lifecycle metrics
+// interfaces but lives in reject.go because RejectDeps imports it
+// directly; keeping the noop coverage here ensures one noopMetrics
+// struct satisfies every interface.
+
 // noopMetrics drops every call. One struct that satisfies all three
 // per-handler interfaces is enough — there is exactly one no-op
 // behaviour to keep in sync.
@@ -49,3 +54,4 @@ func (noopMetrics) RecordDeploy(string)                    {}
 func (noopMetrics) ObserveDeployDuration(context.Context, time.Duration) {}
 func (noopMetrics) RecordStateDrift(string)                {}
 func (noopMetrics) RecordCanary(string, string)            {}
+func (noopMetrics) RecordReject(string, string)            {}

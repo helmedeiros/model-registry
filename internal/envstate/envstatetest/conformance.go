@@ -55,7 +55,9 @@ func RunConformance(t *testing.T, factory Factory) {
 		{"RollbackChampionWithoutHistoryErrors", testRollbackWithoutHistory},
 		{"RollbackChampionWithoutChampionErrors", testRollbackWithoutChampion},
 		{"GetReturnsDeepCopiedRoleAfterPromote", testGetDeepCopiesAfterPromote},
-		{"ChallengerWritersReturnErrNotImplemented", testChallengerStubbed},
+		{"PromoteChallengerSetsState", testPromoteChallengerSetsState},
+		{"RejectChallengerClearsState", testRejectChallengerClearsState},
+		{"RejectChallengerWithoutOneReturnsErrNoChallenger", testRejectChallengerEmpty},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) { c.fn(t, factory) })
@@ -414,17 +416,37 @@ func testGetDeepCopiesAfterPromote(t *testing.T, mk Factory) {
 	}
 }
 
-func testChallengerStubbed(t *testing.T, mk Factory) {
+func testPromoteChallengerSetsState(t *testing.T, mk Factory) {
 	s, _ := mk(t)
-	for _, call := range []struct {
-		name string
-		fn   func() error
-	}{
-		{"PromoteChallenger", func() error { return s.PromoteChallenger(ctx(), "p", store.Hash("h"), "op", "r") }},
-		{"RejectChallenger", func() error { return s.RejectChallenger(ctx(), "p", "op", "r") }},
-	} {
-		if err := call.fn(); !errors.Is(err, envstate.ErrNotImplemented) {
-			t.Fatalf("%s: err=%v want ErrNotImplemented", call.name, err)
-		}
+	if err := s.PromoteChallenger(ctx(), "production", store.Hash("h1"), "alice", "shadow trial"); err != nil {
+		t.Fatalf("PromoteChallenger: %v", err)
+	}
+	st, err := s.Get(ctx(), "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Challenger == nil || st.Challenger.Hash != "h1" {
+		t.Fatalf("challenger not set: %+v", st.Challenger)
+	}
+}
+
+func testRejectChallengerClearsState(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if err := s.PromoteChallenger(ctx(), "production", store.Hash("h1"), "alice", "shadow"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RejectChallenger(ctx(), "production", "alice", "divergence"); err != nil {
+		t.Fatalf("RejectChallenger: %v", err)
+	}
+	st, _ := s.Get(ctx(), "production")
+	if st.Challenger != nil {
+		t.Fatalf("challenger not cleared: %+v", st.Challenger)
+	}
+}
+
+func testRejectChallengerEmpty(t *testing.T, mk Factory) {
+	s, _ := mk(t)
+	if err := s.RejectChallenger(ctx(), "production", "alice", "no-op"); !errors.Is(err, envstate.ErrNoChallenger) {
+		t.Fatalf("err=%v want ErrNoChallenger", err)
 	}
 }

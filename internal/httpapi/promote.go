@@ -80,8 +80,7 @@ func Promote(deps PromoteDeps) http.Handler {
 		case rolePromoteChampion:
 			deps.runChampionPromote(r.Context(), w, req)
 		case rolePromoteChallenger:
-			deps.Metrics.RecordPromotion(req.Env, req.Role, "challenger_not_implemented")
-			writeError(w, http.StatusNotImplemented, "challenger_not_implemented")
+			deps.runChallengerPromote(r.Context(), w, req)
 		default:
 			deps.Metrics.RecordPromotion(req.Env, req.Role, "invalid_role")
 			writeError(w, http.StatusBadRequest, "invalid_role")
@@ -234,6 +233,59 @@ func roleHashOrEmpty(r *envstate.Role) string {
 		return ""
 	}
 	return string(r.Hash)
+}
+
+// runChallengerPromote sets the challenger role on the env so markup-
+// svc (when it implements shadow mode per its own Iteration 5) can
+// load the bytes from the registry's substrate. The registry does NOT
+// roll-out to the data plane today — challenger is metadata-only until
+// the shadow Decider ships in markup-svc.
+func (deps PromoteDeps) runChallengerPromote(ctx context.Context, w http.ResponseWriter, req PromoteRequest) {
+	hash := store.Hash(req.Hash)
+	bundle, err := deps.Artifacts.GetBundle(ctx, hash)
+	if errors.Is(err, store.ErrNotFound) {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "hash_unknown")
+		writeError(w, http.StatusBadRequest, "hash_unknown")
+		return
+	}
+	if err != nil {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "substrate_error")
+		writeError(w, http.StatusInternalServerError, "bundle_lookup_failed")
+		return
+	}
+	if bundle.State == store.StateDeprecated {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "hash_deprecated")
+		writeError(w, http.StatusBadRequest, "hash_deprecated")
+		return
+	}
+
+	commitCtx, commitSpan := startChildSpan(ctx, "registry.challenger.commit_state")
+	err = deps.EnvState.PromoteChallenger(commitCtx, req.Env, hash, req.Operator, req.Reason)
+	commitSpan.End()
+	if err != nil {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "envstate_error")
+		writeError(w, http.StatusInternalServerError, "envstate_failed")
+		return
+	}
+
+	auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
+	if err := deps.recordPromoteAction(auditCtx, req, hash, "promote_challenger"); err != nil {
+		auditSpan.RecordError(err)
+		logInfoWithTrace(deps.Logger, auditCtx, "registry.audit.write_failed", map[string]any{
+			"action":        "promote_challenger",
+			"env":           req.Env,
+			"artifact_hash": req.Hash,
+			"operator":      req.Operator,
+			"error":         err.Error(),
+		})
+	}
+	auditSpan.End()
+
+	deps.Metrics.RecordPromotion(req.Env, req.Role, "ok")
+	writeJSON(w, http.StatusOK, PromoteResponse{
+		Env:     req.Env,
+		NewHash: req.Hash,
+	})
 }
 
 func (deps PromoteDeps) recordPromote(ctx context.Context, req PromoteRequest, hash store.Hash) error {

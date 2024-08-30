@@ -260,20 +260,28 @@ func TestPromoteNoInstancesReturns400InvalidEnv(t *testing.T) {
 	}
 }
 
-func TestPromoteChallengerRoleReturns501(t *testing.T) {
-	deps, st, _, _, _ := newPromoteDeps(t, okResult("http://markup-svc-1:8080"))
+func TestPromoteChallengerRoleSetsStateAndRecordsAudit(t *testing.T) {
+	deps, st, envState, au, _ := newPromoteDeps(t, okResult("http://markup-svc-1:8080"))
 	h := putRule(t, st, []byte("alpha,rule,1.0,1\n"))
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/promote", promoteBody(t, httpapi.PromoteRequest{
-		Hash: string(h), Env: "production", Role: "challenger", Operator: "alice",
+		Hash: string(h), Env: "production", Role: "challenger", Operator: "alice", Reason: "shadow trial",
 	}))
 	httpapi.Promote(deps).ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("status=%d want 501", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := bodyReason(t, rec.Body); got != "challenger_not_implemented" {
-		t.Fatalf("reason=%q want challenger_not_implemented", got)
+	state, _ := envState.Get(context.Background(), "production")
+	if state.Challenger == nil || state.Challenger.Hash != h {
+		t.Fatalf("challenger not set: %+v", state.Challenger)
+	}
+	if state.Champion != nil {
+		t.Fatalf("champion must NOT be set by a challenger promote: %+v", state.Champion)
+	}
+	page, _ := au.List(context.Background(), audit.ListOptions{})
+	if len(page.Items) != 1 || page.Items[0].Action != "promote_challenger" {
+		t.Fatalf("audit: %+v", page.Items)
 	}
 }
 

@@ -250,13 +250,70 @@ func previousChampionHash(history []envstate.Transition, current store.Hash) sto
 	return ""
 }
 
-// PromoteChallenger implements envstate.Writer. Stubbed until ADR-0006.
-func (s *Store) PromoteChallenger(_ context.Context, _ string, _ store.Hash, _, _ string) error {
-	return envstate.ErrNotImplemented
+// PromoteChallenger implements envstate.Writer (ADR-0009).
+func (s *Store) PromoteChallenger(_ context.Context, env string, h store.Hash, operator, reason string) error {
+	if env == "" {
+		return envstate.ErrEnvRequired
+	}
+	if h == "" {
+		return envstate.ErrHashRequired
+	}
+	if operator == "" {
+		return envstate.ErrOperatorRequired
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.clock()
+
+	existing := s.state[env]
+	existing.Env = env
+	existing.Challenger = &envstate.Role{Hash: h, PromotedBy: operator, PromotedAt: now}
+	existing.UpdatedAt = now
+	s.state[env] = existing
+
+	s.history[env] = append(s.history[env], envstate.Transition{
+		Env:      env,
+		Kind:     envstate.KindChallengerPromoted,
+		ToHash:   h,
+		Operator: operator,
+		Reason:   reason,
+		At:       now,
+	})
+	return nil
 }
 
-// RejectChallenger implements envstate.Writer. Stubbed until ADR-0006.
-func (s *Store) RejectChallenger(_ context.Context, _ string, _, _ string) error {
-	return envstate.ErrNotImplemented
+// RejectChallenger implements envstate.Writer (ADR-0009).
+func (s *Store) RejectChallenger(_ context.Context, env, operator, reason string) error {
+	if env == "" {
+		return envstate.ErrEnvRequired
+	}
+	if operator == "" {
+		return envstate.ErrOperatorRequired
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.clock()
+
+	existing, ok := s.state[env]
+	if !ok || existing.Challenger == nil {
+		return envstate.ErrNoChallenger
+	}
+
+	rejected := existing.Challenger.Hash
+	existing.Challenger = nil
+	existing.UpdatedAt = now
+	s.state[env] = existing
+
+	s.history[env] = append(s.history[env], envstate.Transition{
+		Env:      env,
+		Kind:     envstate.KindChallengerRejected,
+		FromHash: rejected,
+		Operator: operator,
+		Reason:   reason,
+		At:       now,
+	})
+	return nil
 }
 

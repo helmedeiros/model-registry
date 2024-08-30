@@ -30,3 +30,7 @@ var ErrNoChampion = errors.New("envstate: no champion set; nothing to roll back"
 // ErrNoPreviousChampion is returned by RollbackChampion when the env
 // has a current champion but no prior promotion to restore.
 var ErrNoPreviousChampion = errors.New("envstate: no previous champion in history")
+
+// ErrNoChallenger is returned by RejectChallenger when the env has no
+// challenger set.
+var ErrNoChallenger = errors.New("envstate: no challenger set")

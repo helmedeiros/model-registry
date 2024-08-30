@@ -39,6 +39,7 @@ type HTTPMetrics struct {
 	deployDur  *prometheus.HistogramVec
 	stateDrift *prometheus.CounterVec
 	canary     *prometheus.CounterVec
+	rejects    *prometheus.CounterVec
 	handler    http.Handler
 }
 
@@ -113,7 +114,14 @@ func New() *HTTPMetrics {
 		},
 		[]string{"env", "decision"},
 	)
-	reg.MustRegister(requests, duration, uploads, promotions, rollbacks, deploys, deployDur, stateDrift, canaryDec)
+	rejects := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "registry_rejects_total",
+			Help: "Total /reject calls per ADR-0009, labelled by env / outcome (ok|no_challenger|invalid|reason_required|invalid_env|invalid_operator|envstate_error).",
+		},
+		[]string{"env", "outcome"},
+	)
+	reg.MustRegister(requests, duration, uploads, promotions, rollbacks, deploys, deployDur, stateDrift, canaryDec, rejects)
 	return &HTTPMetrics{
 		reg:        reg,
 		requests:   requests,
@@ -125,6 +133,7 @@ func New() *HTTPMetrics {
 		deployDur:  deployDur,
 		stateDrift: stateDrift,
 		canary:     canaryDec,
+		rejects:    rejects,
 		// EnableOpenMetrics carries exemplar lines through the /metrics
 		// exposition so a Grafana panel can drill from a histogram bar
 		// to the Jaeger trace whose id is on the exemplar.
@@ -146,6 +155,10 @@ func (m *HTTPMetrics) RecordUpload(outcome string) {
 // RecordPromotion ticks the promotion outcome counter.
 func (m *HTTPMetrics) RecordPromotion(env, role, outcome string) {
 	m.promotions.WithLabelValues(env, role, outcome).Inc()
+}
+
+func (m *HTTPMetrics) RecordReject(env, outcome string) {
+	m.rejects.WithLabelValues(env, outcome).Inc()
 }
 
 // RecordRollback ticks the rollback outcome counter.

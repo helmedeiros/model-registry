@@ -53,6 +53,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, httpClien
 		return runPromote(ctx, rest, stdout, stderr, httpClient)
 	case "rollback":
 		return runRollback(ctx, rest, stdout, stderr, httpClient)
+	case "reject":
+		return runReject(ctx, rest, stdout, stderr, httpClient)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage())
 		return 0
@@ -74,11 +76,13 @@ Read subcommands (ADR-0004):
   history <env> [--limit N] [--json]           env transition history
   audit [--limit N] [--json]                   operator action log
 
-Write subcommands (ADR-0005):
+Write subcommands (ADR-0005, ADR-0009):
   upload --file <path> [--snapshot <path>] [--diagnose <path>]
                        [--operator <o>] [--description <d>] [--json]
   promote --hash <h> --env <e> [--operator <o>] [--reason <r>] [--json]
   rollback --env <e> [--operator <o>] --reason <r> [--json]
+  reject --env <e> [--operator <o>] --reason <r> [--json]
+                       reject the env's current challenger
 
 Flags:
   --registry URL    registry base URL (default ` + defaultRegistry + `)`
