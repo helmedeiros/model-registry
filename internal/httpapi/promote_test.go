@@ -305,6 +305,56 @@ func TestPromoteChallengerRoleSetsStateAndRecordsAudit(t *testing.T) {
 	}
 }
 
+func TestPromoteChallengerDiagnoseRejectionDoesNotCommitEnvstate(t *testing.T) {
+	deps, st, envState, au, _ := newPromoteDeps(t, okResult("http://markup-svc-1:8080"))
+	rejected := deployer.DeployResult{
+		Outcome: deployer.OutcomeDiagnoseRejected,
+		Instances: []deployer.InstanceResult{
+			{
+				URL:    "http://markup-svc-1:8080",
+				Status: deployer.StatusDiagnoseRejected,
+				Error:  "deployer/rolling: rule set failed Diagnose",
+				DiagnoseDetails: &deployer.DiagnoseDetails{
+					Healthy: false,
+					Errors: []deployer.DiagnoseIssue{
+						{Kind: "invalid_factor", Rule: "r1", Detail: "factor is negative"},
+					},
+				},
+			},
+		},
+	}
+	deps.Deployer = stubDeployer{challengerOut: rejected}
+	h := putRule(t, st, []byte("alpha,rule,1.0,1\n"))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/promote", promoteBody(t, httpapi.PromoteRequest{
+		Hash: string(h), Env: "production", Role: "challenger", Operator: "alice", Reason: "shadow trial",
+	}))
+	httpapi.Promote(deps).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d want 422 on Diagnose rejection; body=%s", rec.Code, rec.Body.String())
+	}
+	state, _ := envState.Get(context.Background(), "production")
+	if state.Challenger != nil {
+		t.Fatalf("envstate Challenger committed on Diagnose-rejected push — gate failed: %+v", state.Challenger)
+	}
+	page, _ := au.List(context.Background(), audit.ListOptions{})
+	if len(page.Items) != 1 || page.Items[0].Action != "promote_rejected_challenger" {
+		t.Fatalf("audit: %+v want one promote_rejected_challenger entry", page.Items)
+	}
+	var resp httpapi.PromoteRejectedResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Reason != "diagnose_rejected" {
+		t.Fatalf("reason=%q want diagnose_rejected", resp.Reason)
+	}
+	if resp.Diagnose == nil || len(resp.Diagnose.Errors) != 1 {
+		t.Fatalf("diagnose details missing: %+v", resp.Diagnose)
+	}
+}
+
 func TestPromoteChallengerPushFailureDoesNotRollBackEnvstate(t *testing.T) {
 	deps, st, envState, _, _ := newPromoteDeps(t, okResult("http://markup-svc-1:8080"))
 	failed := deployer.DeployResult{

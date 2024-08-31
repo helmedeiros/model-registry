@@ -280,6 +280,39 @@ func (deps PromoteDeps) runChallengerPromote(ctx context.Context, w http.Respons
 		return
 	}
 
+	// Pre-promote Diagnose gate (symmetrical with ADR-0006 for champion).
+	// Push to markup-svc FIRST. If any instance rejected on Diagnose,
+	// the bytes are structurally broken and committing envstate would
+	// create a "registry says challenger / markup-svc cannot run it"
+	// divergence. Fail-fast with 422 and do NOT commit envstate.
+	pushCtx, pushSpan := startChildSpan(ctx, "registry.challenger.fan_out_push")
+	deployResult, _ := deps.Deployer.DeployChallenger(pushCtx, targets, deployer.Body{Bytes: source, ContentType: string(sourceCT)})
+	pushSpan.End()
+
+	if anyDiagnoseRejected(deployResult.Instances) {
+		deps.Metrics.RecordPromotion(req.Env, req.Role, "diagnose_rejected")
+		auditCtx, auditSpan := startChildSpan(ctx, "registry.audit.record")
+		if err := deps.recordPromoteAction(auditCtx, req, hash, "promote_rejected_challenger", "env/"+req.Env+"/challenger"); err != nil {
+			auditSpan.RecordError(err)
+			logInfoWithTrace(deps.Logger, auditCtx, "registry.audit.write_failed", map[string]any{
+				"action":        "promote_rejected_challenger",
+				"env":           req.Env,
+				"artifact_hash": req.Hash,
+				"operator":      req.Operator,
+				"error":         err.Error(),
+			})
+		}
+		auditSpan.End()
+		writeJSON(w, http.StatusUnprocessableEntity, PromoteRejectedResponse{
+			Env:      req.Env,
+			NewHash:  req.Hash,
+			Reason:   "diagnose_rejected",
+			Diagnose: diagnoseDetailsView(deployResult.Instances),
+			Deploy:   deployView(deployResult),
+		})
+		return
+	}
+
 	commitCtx, commitSpan := startChildSpan(ctx, "registry.challenger.commit_state")
 	err = deps.EnvState.PromoteChallenger(commitCtx, req.Env, hash, req.Operator, req.Reason)
 	commitSpan.End()
@@ -302,16 +335,25 @@ func (deps PromoteDeps) runChallengerPromote(ctx context.Context, w http.Respons
 	}
 	auditSpan.End()
 
-	pushCtx, pushSpan := startChildSpan(ctx, "registry.challenger.fan_out_push")
-	deployResult, _ := deps.Deployer.DeployChallenger(pushCtx, targets, deployer.Body{Bytes: source, ContentType: string(sourceCT)})
-	pushSpan.End()
-
 	deps.Metrics.RecordPromotion(req.Env, req.Role, outcomeFromChallengerDeploy(deployResult))
 	writeJSON(w, http.StatusOK, PromoteResponse{
 		Env:     req.Env,
 		NewHash: req.Hash,
 		Deploy:  deployView(deployResult),
 	})
+}
+
+// anyDiagnoseRejected returns true when any instance result is a
+// Diagnose rejection. Even a single instance rejecting on Diagnose
+// is enough to fail the pre-promote gate because the rule set's
+// structural validity is the same across instances.
+func anyDiagnoseRejected(results []deployer.InstanceResult) bool {
+	for _, r := range results {
+		if r.Status == deployer.StatusDiagnoseRejected {
+			return true
+		}
+	}
+	return false
 }
 
 // outcomeFromChallengerDeploy maps the rolling deployer's outcome to
