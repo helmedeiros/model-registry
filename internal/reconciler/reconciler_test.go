@@ -2,6 +2,8 @@ package reconciler_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -93,6 +95,65 @@ func TestReconciler_TicksRePushChallengerWhenLoaded(t *testing.T) {
 	}
 	if !log.seen("registry.reconciler.reconciled") {
 		t.Fatalf("reconciled log event not seen: %+v", log.events)
+	}
+}
+
+type fixedDiscovery struct{ url string }
+
+func (f fixedDiscovery) Instances(_ context.Context, _ string) ([]instances.Instance, error) {
+	return []instances.Instance{{URL: f.url, Env: "production"}}, nil
+}
+
+func TestReconciler_LivenessTransitionFiresPerInstanceRecovery(t *testing.T) {
+	st := memstore.New()
+	source := []byte("alpha,rule,1.0,1\n")
+	h, _ := st.Put(context.Background(), store.PutRequest{SourceBytes: source, ContentType: store.ContentTypeCSV})
+	envState := memstate.New()
+	if err := envState.PromoteChallenger(context.Background(), "production", h, "alice", "shadow trial"); err != nil {
+		t.Fatal(err)
+	}
+
+	// markup-svc stub: /readyz returns 503 for the first 2 polls, 200
+	// thereafter. The transition fires the per-instance recovery.
+	var readyzHits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/readyz" {
+			n := atomic.AddInt32(&readyzHits, 1)
+			if n <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	dep := &stubDeployer{out: deployer.DeployResult{Outcome: deployer.OutcomeOK}}
+	log := &captureLogger{}
+	rec := reconciler.New(
+		[]string{"production"}, envState, st,
+		fixedDiscovery{url: srv.URL}, dep, log,
+		1*time.Hour, // very long full-reconcile interval so it does not fire
+		reconciler.WithLivenessInterval(10*time.Millisecond),
+		reconciler.WithLivenessHTTPClient(srv.Client()),
+		reconciler.WithLivenessTimeout(500*time.Millisecond),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go rec.Start(ctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(&dep.calls) >= 1 && log.seen("registry.reconciler.recovered_instance") {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	if atomic.LoadInt32(&dep.calls) < 1 {
+		t.Fatalf("DeployChallenger never fired after readyz transition: %+v", log.events)
+	}
+	if !log.seen("registry.reconciler.recovered_instance") {
+		t.Fatalf("recovered_instance log event not seen: %+v", log.events)
 	}
 }
 

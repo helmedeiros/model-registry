@@ -34,6 +34,7 @@ type Config struct {
 	BusinessStatsPromURL string
 	ShadowStatsPromURL   string
 	ReconcileInterval    time.Duration
+	ReconcileLivenessInterval time.Duration
 }
 
 const (
@@ -90,6 +91,8 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 	fs.StringVar(&cfg.ShadowStatsPromURL, "shadow-stats-prom-url", envOr("REGISTRY_SHADOW_STATS_PROM_URL", cfg.ShadowStatsPromURL), "Prometheus base URL for /shadow-stats (markup-svc challenger comparison metrics, ADR-0013). Empty = endpoint disabled.")
 	reconcileStr := envOr("REGISTRY_RECONCILE_INTERVAL", "")
 	fs.StringVar(&reconcileStr, "reconcile-interval", reconcileStr, "Background reconciliation period for re-pushing the current Challenger envstate to markup-svc (Go duration). Empty = disabled. Recommended 5m-30m in production so a markup-svc restart recovers without operator intervention within one tick.")
+	reconcileLivenessStr := envOr("REGISTRY_RECONCILE_LIVENESS_INTERVAL", "")
+	fs.StringVar(&reconcileLivenessStr, "reconcile-liveness-interval", reconcileLivenessStr, "Per-instance /readyz poll period (Go duration). When a markup-svc instance transitions from not-ready to ready, the reconciler re-pushes the Challenger to that instance immediately. Empty = liveness tracking disabled; recovery waits up to one --reconcile-interval. Recommended 5s-30s in production.")
 	// flag.DurationVar cannot be pre-seeded from env; bind a string
 	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
 	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())
@@ -123,6 +126,13 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 			return Config{}, fs, fmt.Errorf("config: reconcile-interval %q: %w", reconcileStr, err)
 		}
 		cfg.ReconcileInterval = parsedReconcile
+	}
+	if reconcileLivenessStr != "" {
+		parsedLiveness, err := time.ParseDuration(reconcileLivenessStr)
+		if err != nil {
+			return Config{}, fs, fmt.Errorf("config: reconcile-liveness-interval %q: %w", reconcileLivenessStr, err)
+		}
+		cfg.ReconcileLivenessInterval = parsedLiveness
 	}
 
 	if thresholdStr != "" {

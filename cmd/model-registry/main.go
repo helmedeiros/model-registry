@@ -179,7 +179,11 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	}
 	if cfg.ReconcileInterval > 0 && deps.Promote != nil {
 		if lister, ok := deps.Promote.Discovery.(instances.EnvLister); ok {
-			rec := reconciler.New(lister.Envs(), deps.EnvState, deps.Artifacts, deps.Promote.Discovery, deps.Promote.Deployer, logger, cfg.ReconcileInterval)
+			recOpts := []reconciler.Option{}
+			if cfg.ReconcileLivenessInterval > 0 {
+				recOpts = append(recOpts, reconciler.WithLivenessInterval(cfg.ReconcileLivenessInterval))
+			}
+			rec := reconciler.New(lister.Envs(), deps.EnvState, deps.Artifacts, deps.Promote.Discovery, deps.Promote.Deployer, logger, cfg.ReconcileInterval, recOpts...)
 			go rec.Start(ctx)
 			logger.Info("registry.reconciler.enabled", map[string]any{
 				"interval":  cfg.ReconcileInterval.String(),
