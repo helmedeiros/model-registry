@@ -335,28 +335,48 @@ func (d *Deployer) challengerClearOne(ctx context.Context, target instances.Inst
 	defer span.End()
 
 	start := time.Now()
-	clearCtx, cancel := context.WithTimeout(ctx, d.instanceTimeout)
-	defer cancel()
+	var lastErr error
+	for attempt := 0; attempt <= d.challengerRetries; attempt++ {
+		if attempt > 0 {
+			wait := d.challengerBackoff * time.Duration(1<<(2*attempt-2))
+			if !sleepCtx(ctx, wait) {
+				lastErr = ctx.Err()
+				break
+			}
+		}
+		err := d.singleClearAttempt(ctx, target)
+		if err == nil {
+			if attempt > 0 {
+				span.SetAttributes(attribute.Int("retry.attempts", attempt))
+			}
+			return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusDeployed, Duration: time.Since(start)}
+		}
+		lastErr = err
+	}
+	span.RecordError(lastErr)
+	span.SetAttributes(attribute.Int("retry.attempts", d.challengerRetries))
+	span.SetStatus(codes.Error, "challenger clear failed after retries")
+	return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusFailed, Duration: time.Since(start), Error: lastErr.Error()}
+}
 
+func (d *Deployer) singleClearAttempt(parent context.Context, target instances.Instance) error {
+	clearCtx, cancel := context.WithTimeout(parent, d.instanceTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(clearCtx, http.MethodDelete, target.URL+"/admin/challenger", nil)
 	if err != nil {
-		span.RecordError(err)
-		return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusFailed, Duration: time.Since(start), Error: err.Error()}
+		return err
 	}
 	otel.GetTextMapPropagator().Inject(clearCtx, propagation.HeaderCarrier(req.Header))
 	resp, err := d.client.Do(req)
 	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "challenger clear failed")
-		return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusFailed, Duration: time.Since(start), Error: err.Error()}
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		span.SetStatus(codes.Error, "challenger clear non-204")
-		return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusFailed, Duration: time.Since(start), Error: fmt.Sprintf("DELETE /admin/challenger %s: %s", resp.Status, string(b))}
+		return fmt.Errorf("DELETE /admin/challenger %s: %s", resp.Status, string(b))
 	}
-	return deployer.InstanceResult{URL: target.URL, Status: deployer.StatusDeployed, Duration: time.Since(start)}
+	return nil
 }
 
 // reloadRejectBody mirrors markup-svc/ADR-0026's reject envelope. The

@@ -180,3 +180,29 @@ func TestClearChallengerSurfaces5xx(t *testing.T) {
 		t.Fatalf("outcome=%s want failed", result.Outcome)
 	}
 }
+
+func TestClearChallengerRecoversFromTransientFailure(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		if n < 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	d := rolling.New(
+		rolling.WithHTTPClient(srv.Client()),
+		rolling.WithChallengerRetries(2),
+		rolling.WithChallengerBackoff(1*time.Millisecond),
+	)
+	result, _ := d.ClearChallenger(context.Background(),
+		[]instances.Instance{{URL: srv.URL, Env: "production"}})
+	if result.Outcome != deployer.OutcomeOK {
+		t.Fatalf("outcome=%s want ok after retry; instances=%+v", result.Outcome, result.Instances)
+	}
+	if atomic.LoadInt32(&hits) != 2 {
+		t.Fatalf("hits=%d want 2 (first 500, retry 204)", hits)
+	}
+}
