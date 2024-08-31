@@ -49,9 +49,11 @@ func (e *diagnoseRejectedErr) Error() string {
 // production runs use a configured http.Client with timeouts the cmd
 // shell controls.
 type Deployer struct {
-	client          *http.Client
-	instanceTimeout time.Duration
-	readyzInterval  time.Duration
+	client            *http.Client
+	instanceTimeout   time.Duration
+	readyzInterval    time.Duration
+	challengerRetries int
+	challengerBackoff time.Duration
 }
 
 // Option configures a Deployer at construction.
@@ -71,12 +73,28 @@ func WithReadyzInterval(t time.Duration) Option {
 	return func(d *Deployer) { d.readyzInterval = t }
 }
 
+// WithChallengerRetries sets the number of additional attempts on
+// transient challenger-push / challenger-clear failures (network,
+// 5xx). Default 2 (3 total attempts: initial + 2 retries). 0 disables
+// retry. Diagnose rejections are NEVER retried — same bytes, same
+// rejection.
+func WithChallengerRetries(n int) Option { return func(d *Deployer) { d.challengerRetries = n } }
+
+// WithChallengerBackoff sets the base backoff between challenger
+// retries. Each retry waits backoff × 4^attempt. Default 100ms gives
+// 100ms / 400ms / 1.6s waits.
+func WithChallengerBackoff(t time.Duration) Option {
+	return func(d *Deployer) { d.challengerBackoff = t }
+}
+
 // New constructs a rolling Deployer with the ADR-0005 defaults.
 func New(opts ...Option) *Deployer {
 	d := &Deployer{
-		client:          &http.Client{Timeout: 30 * time.Second},
-		instanceTimeout: 10 * time.Second,
-		readyzInterval:  200 * time.Millisecond,
+		client:            &http.Client{Timeout: 30 * time.Second},
+		instanceTimeout:   10 * time.Second,
+		readyzInterval:    200 * time.Millisecond,
+		challengerRetries: 2,
+		challengerBackoff: 100 * time.Millisecond,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -246,10 +264,28 @@ func (d *Deployer) challengerPushOne(ctx context.Context, target instances.Insta
 	defer span.End()
 
 	start := time.Now()
-	pushCtx, cancel := context.WithTimeout(ctx, d.instanceTimeout)
-	defer cancel()
-
-	if err := d.postBody(pushCtx, target.URL+"/admin/load-challenger", body); err != nil {
+	var lastErr error
+	for attempt := 0; attempt <= d.challengerRetries; attempt++ {
+		if attempt > 0 {
+			wait := d.challengerBackoff * time.Duration(1<<(2*attempt-2))
+			if !sleepCtx(ctx, wait) {
+				lastErr = ctx.Err()
+				break
+			}
+		}
+		pushCtx, cancel := context.WithTimeout(ctx, d.instanceTimeout)
+		err := d.postBody(pushCtx, target.URL+"/admin/load-challenger", body)
+		cancel()
+		if err == nil {
+			if attempt > 0 {
+				span.SetAttributes(attribute.Int("retry.attempts", attempt))
+			}
+			return deployer.InstanceResult{
+				URL:      target.URL,
+				Status:   deployer.StatusDeployed,
+				Duration: time.Since(start),
+			}
+		}
 		var dre *diagnoseRejectedErr
 		if errors.As(err, &dre) {
 			span.SetAttributes(attribute.String("diagnose.verdict", "rejected"))
@@ -262,19 +298,28 @@ func (d *Deployer) challengerPushOne(ctx context.Context, target instances.Insta
 				DiagnoseDetails: dre.details,
 			}
 		}
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "challenger push failed")
-		return deployer.InstanceResult{
-			URL:      target.URL,
-			Status:   deployer.StatusFailed,
-			Duration: time.Since(start),
-			Error:    err.Error(),
-		}
+		lastErr = err
 	}
+	span.RecordError(lastErr)
+	span.SetAttributes(attribute.Int("retry.attempts", d.challengerRetries))
+	span.SetStatus(codes.Error, "challenger push failed after retries")
 	return deployer.InstanceResult{
 		URL:      target.URL,
-		Status:   deployer.StatusDeployed,
+		Status:   deployer.StatusFailed,
 		Duration: time.Since(start),
+		Error:    lastErr.Error(),
+	}
+}
+
+// sleepCtx waits d unless ctx ends first. Returns false on ctx end.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

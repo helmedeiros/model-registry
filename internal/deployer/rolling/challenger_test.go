@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/helmedeiros/model-registry/internal/deployer"
 	"github.com/helmedeiros/model-registry/internal/deployer/rolling"
@@ -109,6 +110,61 @@ func TestDeployChallengerMixedFleetReportsPartial(t *testing.T) {
 		deployer.Body{Bytes: []byte("x"), ContentType: "text/csv"})
 	if result.Outcome != deployer.OutcomePartial {
 		t.Fatalf("outcome=%s want partial; instances=%+v", result.Outcome, result.Instances)
+	}
+}
+
+func TestDeployChallengerRecoversFromTransientFailure(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		if n < 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"rule_count":1,"model_version":"v0"}`))
+	}))
+	defer srv.Close()
+
+	d := rolling.New(
+		rolling.WithHTTPClient(srv.Client()),
+		rolling.WithChallengerRetries(2),
+		rolling.WithChallengerBackoff(1*time.Millisecond),
+	)
+	result, _ := d.DeployChallenger(context.Background(),
+		[]instances.Instance{{URL: srv.URL, Env: "production"}},
+		deployer.Body{Bytes: []byte("alpha,a,1.0,1\n"), ContentType: "text/csv"})
+	if result.Outcome != deployer.OutcomeOK {
+		t.Fatalf("outcome=%s want ok after retry; instances=%+v", result.Outcome, result.Instances)
+	}
+	if atomic.LoadInt32(&hits) != 2 {
+		t.Fatalf("hits=%d want 2 (first 500, retry 200)", hits)
+	}
+}
+
+func TestDeployChallengerDoesNotRetryDiagnoseRejection(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"reload rejected: rule set failed Diagnose","healthy":false,"errors":[{"kind":"invalid_factor","rule":"r1","detail":"factor is negative"}]}`))
+	}))
+	defer srv.Close()
+
+	d := rolling.New(
+		rolling.WithHTTPClient(srv.Client()),
+		rolling.WithChallengerRetries(3),
+		rolling.WithChallengerBackoff(1*time.Millisecond),
+	)
+	result, _ := d.DeployChallenger(context.Background(),
+		[]instances.Instance{{URL: srv.URL, Env: "production"}},
+		deployer.Body{Bytes: []byte("x"), ContentType: "text/csv"})
+	if result.Outcome != deployer.OutcomeDiagnoseRejected {
+		t.Fatalf("outcome=%s want diagnose_rejected", result.Outcome)
+	}
+	if atomic.LoadInt32(&hits) != 1 {
+		t.Fatalf("hits=%d want 1; retry on Diagnose rejection wastes budget", hits)
 	}
 }
 
