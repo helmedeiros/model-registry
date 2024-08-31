@@ -83,7 +83,8 @@ Read subcommands (ADR-0004):
   audit [--limit N] [--json]                   operator action log
   stats <env> [--since 5m] [--json]            business outcome metrics
   diff <from-hash> <to-hash> [--json]          rule provenance diff between bundles
-  shadow [--since 5m] [--json]                 markup-svc challenger comparison metrics
+  shadow [--since 5m] [--json] [--gate]        markup-svc challenger comparison metrics
+                       [--min-agreement 0.99] [--min-samples 10000] [--max-factor-delta-p99 0.05]
 
 Write subcommands (ADR-0005, ADR-0009):
   upload --file <path> [--snapshot <path>] [--diagnose <path>]
