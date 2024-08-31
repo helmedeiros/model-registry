@@ -22,6 +22,8 @@ import (
 	"github.com/helmedeiros/model-registry/internal/audit/fsaudit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
 	"github.com/helmedeiros/model-registry/internal/businessstats"
+	"github.com/helmedeiros/model-registry/internal/instances"
+	"github.com/helmedeiros/model-registry/internal/reconciler"
 	"github.com/helmedeiros/model-registry/internal/shadowstats"
 	"github.com/helmedeiros/model-registry/internal/canary"
 	"github.com/helmedeiros/model-registry/internal/config"
@@ -174,6 +176,20 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 	if reader := buildShadowStatsReader(cfg); reader != nil {
 		deps.ShadowStats = &httpapi.ShadowStatsDeps{Reader: reader}
 		logger.Info("registry.shadow_stats.enabled", map[string]any{"prom_url": cfg.ShadowStatsPromURL})
+	}
+	if cfg.ReconcileInterval > 0 && deps.Promote != nil {
+		if lister, ok := deps.Promote.Discovery.(instances.EnvLister); ok {
+			rec := reconciler.New(lister.Envs(), deps.EnvState, deps.Artifacts, deps.Promote.Discovery, deps.Promote.Deployer, logger, cfg.ReconcileInterval)
+			go rec.Start(ctx)
+			logger.Info("registry.reconciler.enabled", map[string]any{
+				"interval":  cfg.ReconcileInterval.String(),
+				"env_count": len(lister.Envs()),
+			})
+		} else {
+			logger.Info("registry.reconciler.disabled", map[string]any{
+				"reason": "discovery does not implement EnvLister",
+			})
+		}
 	}
 	server := &http.Server{
 		Handler: httpapi.NewRouter(deps, metrics.Handler()),

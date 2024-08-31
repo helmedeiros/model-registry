@@ -80,6 +80,15 @@ func NewFromMap(raw map[string][]string) (*Discovery, error) {
 }
 
 // Instances implements instances.Discovery.
+// Envs implements instances.EnvLister.
+func (d *Discovery) Envs() []string {
+	out := make([]string, 0, len(d.envs))
+	for env := range d.envs {
+		out = append(out, env)
+	}
+	return out
+}
+
 func (d *Discovery) Instances(_ context.Context, env string) ([]instances.Instance, error) {
 	got, ok := d.envs[env]
 	if !ok || len(got) == 0 {

@@ -26,6 +26,14 @@ type Discovery interface {
 	Instances(ctx context.Context, env string) ([]Instance, error)
 }
 
+// EnvLister is the optional projection a Discovery may expose so
+// reconciliation loops can walk all known envs without an out-of-band
+// configuration source. Static-config Discovery satisfies this; a
+// future dynamic Discovery (k8s, consul) implements it the same way.
+type EnvLister interface {
+	Envs() []string
+}
+
 // ErrNoInstances is returned by Discovery.Instances when an env has
 // no markup-svc base URLs configured. Callers (Promote / Rollback)
 // treat this as a 400 invalid_env rather than retrying.

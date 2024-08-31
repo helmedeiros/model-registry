@@ -33,6 +33,7 @@ type Config struct {
 	WriteRateBurst     int
 	BusinessStatsPromURL string
 	ShadowStatsPromURL   string
+	ReconcileInterval    time.Duration
 }
 
 const (
@@ -87,6 +88,8 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 	fs.StringVar(&writeBurstStr, "write-rate-burst", writeBurstStr, "Token-bucket burst per env on /promote + /rollback.")
 	fs.StringVar(&cfg.BusinessStatsPromURL, "business-stats-prom-url", envOr("REGISTRY_BUSINESS_STATS_PROM_URL", cfg.BusinessStatsPromURL), "Prometheus base URL for /env/<env>/business-stats. Empty = endpoint disabled.")
 	fs.StringVar(&cfg.ShadowStatsPromURL, "shadow-stats-prom-url", envOr("REGISTRY_SHADOW_STATS_PROM_URL", cfg.ShadowStatsPromURL), "Prometheus base URL for /shadow-stats (markup-svc challenger comparison metrics, ADR-0013). Empty = endpoint disabled.")
+	reconcileStr := envOr("REGISTRY_RECONCILE_INTERVAL", "")
+	fs.StringVar(&reconcileStr, "reconcile-interval", reconcileStr, "Background reconciliation period for re-pushing the current Challenger envstate to markup-svc (Go duration). Empty = disabled. Recommended 5m-30m in production so a markup-svc restart recovers without operator intervention within one tick.")
 	// flag.DurationVar cannot be pre-seeded from env; bind a string
 	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
 	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())
@@ -113,6 +116,14 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 		return Config{}, fs, fmt.Errorf("config: canary-poll-every %q: %w", canaryPollStr, err)
 	}
 	cfg.CanaryPollEvery = parsedPoll
+
+	if reconcileStr != "" {
+		parsedReconcile, err := time.ParseDuration(reconcileStr)
+		if err != nil {
+			return Config{}, fs, fmt.Errorf("config: reconcile-interval %q: %w", reconcileStr, err)
+		}
+		cfg.ReconcileInterval = parsedReconcile
+	}
 
 	if thresholdStr != "" {
 		f, perr := strconv.ParseFloat(thresholdStr, 64)
