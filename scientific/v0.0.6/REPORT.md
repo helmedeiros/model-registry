@@ -6,9 +6,7 @@ The shadow `dispatchShadow` + sampling benches live in markup-svc (where the cod
 
 Per the ADR-0012 protocol, every bar below is pre-registered BEFORE measurement; bars never move; honest framing.
 
-This commit registers the bars. Measured numbers land in a follow-up commit after the benches have been run.
-
-## Pre-registered bars (status: pending)
+## Pre-registered bars (status: measured)
 
 | Benchmark | Bar | Layer | Reference | Status |
 |-----------|-----|-------|-----------|--------|
@@ -28,9 +26,39 @@ This commit registers the bars. Measured numbers land in a follow-up commit afte
 - Each bench reports allocs/op via `b.ReportAllocs()`.
 - Percentile-based bars use `b.ReportMetric` for p50/p95/p99/p999 plus a `b.Errorf` guard at the bar so a regression fails the bench instead of silently passing.
 
-## Measured numbers
+## Measured numbers (Apple M4, three-run medians)
 
-Pending. Filled in a follow-up commit after running.
+Three consecutive runs of:
+
+```
+go test -tags=bench -count=3 -run NONE -bench <name> -benchmem -benchtime=100x <pkg>
+```
+
+| Statistic | `BenchmarkChallengerPushN3` | `BenchmarkShadowStatsPromFanOut` |
+|-----------|----------------------------|----------------------------------|
+| p50 | 240 µs | 429 µs |
+| p95 | 284 µs | 730 µs |
+| p99 | 444 µs | 813 µs |
+| p999 | 444 µs | 813 µs |
+| allocs / round | 455 | 2,570 |
+| heap / round | 65 KB | 309 KB |
+| Bar | ≤ 100 ms p99 | ≤ 50 ms p99 |
+| Margin | ~225× under bar | ~62× under bar |
+
+The `b.Errorf` gates did not fire in any of the three runs.
+
+### Where the cost lives
+
+**ChallengerPushN3** (444 µs p99 median): three sequential `http.Client.Do` calls against a loopback stub. The 455 allocs/round + 65 KB/round are dominated by `http.NewRequestWithContext` + `bytes.NewReader` + the OTel span lifecycle per instance (3 × per-call cost ~150 alloc / 22 KB). The bar covered the 3 × 10s `instanceTimeout` ceiling at the pessimistic end (30 s) and the operator-quoted "~150 ms with sub-50 ms RTT" at the realistic end. The actual stub-loopback number is ~225× faster than the bar — production will close most of that gap with network RTT.
+
+**ShadowStatsPromFanOut** (813 µs p99 median): 14 concurrent `errgroup` queries against a stub Prometheus. The 2,570 allocs/round are 14 × per-query goroutine + http.Request + json.Decoder. The bar covered concurrent fan-out at real-Prom RTT; the stub-loopback number isolates the registry-side plumbing cost. Production will see real-Prom RTT dominate.
+
+### Comparison to ADR-0012/0013 prose claims
+
+| ADR claim | Source | Measured |
+|-----------|--------|----------|
+| "registry-side per-instance loop dominates over network for sub-50ms RTT" (ADR-0012) | analytic | 240 µs p50 / 444 µs p99 confirms loopback floor is well under any production RTT; claim stands |
+| "non-trivial at dashboard cadence" for /shadow-stats (ADR-0013) | analytic | 813 µs p99 per call × 600 calls/hour = 488 ms of bench-equivalent CPU/hour; "non-trivial" was prudent but the absolute load is small |
 
 ## What these bars prove and what they do not
 
