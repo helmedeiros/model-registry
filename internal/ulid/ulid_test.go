@@ -50,7 +50,7 @@ func TestSameMillisecondMonotonicallyIncrements(t *testing.T) {
 	a, _ := g.New()
 	b, _ := g.New()
 	c, _ := g.New()
-	if !(a < b && b < c) {
+	if a >= b || b >= c {
 		t.Fatalf("monotonic increment broken: %s %s %s", a, b, c)
 	}
 }

@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  exclusions:
+    rules:
+      # mrctl prints to stdout/stderr; ignoring Fprintf write errors is
+      # the CLI convention. If the terminal pipe is broken, the next
+      # syscall surfaces it.
+      - path: cmd/(mrctl|model-registry)/.*\.go
+        linters: [errcheck]
+        text: 'Error return value of `fmt\.(Fprintf|Fprintln|Fprint)`'

@@ -21,7 +21,6 @@ import (
 )
 
 type stubDeployer struct {
-	mu    sync.Mutex
 	calls int32
 	out   deployer.DeployResult
 }
