@@ -21,6 +21,7 @@ import (
 	"github.com/helmedeiros/model-registry/internal/audit"
 	"github.com/helmedeiros/model-registry/internal/audit/fsaudit"
 	"github.com/helmedeiros/model-registry/internal/audit/memaudit"
+	"github.com/helmedeiros/model-registry/internal/autopromote"
 	"github.com/helmedeiros/model-registry/internal/businessstats"
 	"github.com/helmedeiros/model-registry/internal/instances"
 	"github.com/helmedeiros/model-registry/internal/reconciler"
@@ -173,25 +174,52 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		deps.BusinessStats = &httpapi.BusinessStatsDeps{Reader: reader}
 		logger.Info("registry.business_stats.enabled", map[string]any{"prom_url": cfg.BusinessStatsPromURL})
 	}
-	if reader := buildShadowStatsReader(cfg); reader != nil {
-		deps.ShadowStats = &httpapi.ShadowStatsDeps{Reader: reader}
+	shadowReader := buildShadowStatsReader(cfg)
+	if shadowReader != nil {
+		deps.ShadowStats = &httpapi.ShadowStatsDeps{Reader: shadowReader}
 		logger.Info("registry.shadow_stats.enabled", map[string]any{"prom_url": cfg.ShadowStatsPromURL})
 	}
+	var envs []string
+	var envsOK bool
+	if deps.Promote != nil {
+		envs, envsOK = resolveEnvs(deps.Promote.Discovery)
+	}
+	if cfg.AutoPromoteInterval > 0 && shadowReader != nil && deps.Promote != nil {
+		if !envsOK {
+			logger.Info("registry.autopromote.disabled", map[string]any{
+				"reason": "discovery does not implement EnvLister",
+			})
+		} else {
+			obs := autopromote.New(autopromote.Config{
+				Envs:     envs,
+				EnvState: deps.EnvState,
+				Shadow:   shadowReader,
+				Logger:   logger,
+				Interval: cfg.AutoPromoteInterval,
+			})
+			go obs.Start(ctx)
+			logger.Info("registry.autopromote.enabled", map[string]any{
+				"interval":  cfg.AutoPromoteInterval.String(),
+				"env_count": len(envs),
+				"mode":      "log_only",
+			})
+		}
+	}
 	if cfg.ReconcileInterval > 0 && deps.Promote != nil {
-		if lister, ok := deps.Promote.Discovery.(instances.EnvLister); ok {
-			recOpts := []reconciler.Option{}
+		if !envsOK {
+			logger.Info("registry.reconciler.disabled", map[string]any{
+				"reason": "discovery does not implement EnvLister",
+			})
+		} else {
+			var recOpts []reconciler.Option
 			if cfg.ReconcileLivenessInterval > 0 {
 				recOpts = append(recOpts, reconciler.WithLivenessInterval(cfg.ReconcileLivenessInterval))
 			}
-			rec := reconciler.New(lister.Envs(), deps.EnvState, deps.Artifacts, deps.Promote.Discovery, deps.Promote.Deployer, logger, cfg.ReconcileInterval, recOpts...)
+			rec := reconciler.New(envs, deps.EnvState, deps.Artifacts, deps.Promote.Discovery, deps.Promote.Deployer, logger, cfg.ReconcileInterval, recOpts...)
 			go rec.Start(ctx)
 			logger.Info("registry.reconciler.enabled", map[string]any{
 				"interval":  cfg.ReconcileInterval.String(),
-				"env_count": len(lister.Envs()),
-			})
-		} else {
-			logger.Info("registry.reconciler.disabled", map[string]any{
-				"reason": "discovery does not implement EnvLister",
+				"env_count": len(envs),
 			})
 		}
 	}
@@ -247,6 +275,14 @@ func Run(parent context.Context, args []string, stdout, stderr io.Writer, listen
 		return 1
 	}
 	return 0
+}
+
+func resolveEnvs(discovery instances.Discovery) ([]string, bool) {
+	lister, ok := discovery.(instances.EnvLister)
+	if !ok {
+		return nil, false
+	}
+	return lister.Envs(), true
 }
 
 func buildPromoteDeps(cfg config.Config, st store.Store, envState envstate.Store, auditLog audit.Writer, idgen httpapi.ULIDSource, logger httpapi.AccessSink) (*httpapi.PromoteDeps, error) {

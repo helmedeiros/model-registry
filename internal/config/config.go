@@ -35,6 +35,7 @@ type Config struct {
 	ShadowStatsPromURL   string
 	ReconcileInterval    time.Duration
 	ReconcileLivenessInterval time.Duration
+	AutoPromoteInterval       time.Duration
 }
 
 const (
@@ -93,6 +94,8 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 	fs.StringVar(&reconcileStr, "reconcile-interval", reconcileStr, "Background reconciliation period for re-pushing the current Challenger envstate to markup-svc (Go duration). Empty = disabled. Recommended 5m-30m in production so a markup-svc restart recovers without operator intervention within one tick.")
 	reconcileLivenessStr := envOr("REGISTRY_RECONCILE_LIVENESS_INTERVAL", "")
 	fs.StringVar(&reconcileLivenessStr, "reconcile-liveness-interval", reconcileLivenessStr, "Per-instance /readyz poll period (Go duration). When a markup-svc instance transitions from not-ready to ready, the reconciler re-pushes the Challenger to that instance immediately. Empty = liveness tracking disabled; recovery waits up to one --reconcile-interval. Recommended 5s-30s in production.")
+	autoPromoteStr := envOr("REGISTRY_AUTO_PROMOTE_INTERVAL", "")
+	fs.StringVar(&autoPromoteStr, "auto-promote-from-shadow-interval", autoPromoteStr, "Polling period for the auto-promote-from-shadow observer (Go duration). Empty = disabled. Recommended 1m-5m in production.")
 	// flag.DurationVar cannot be pre-seeded from env; bind a string
 	// intermediary so REGISTRY_SHUTDOWN_TIMEOUT resolves before fs.Parse.
 	timeoutStr := envOr("REGISTRY_SHUTDOWN_TIMEOUT", cfg.ShutdownTimeout.String())
@@ -133,6 +136,13 @@ func LoadFromArgs(args []string) (Config, *flag.FlagSet, error) {
 			return Config{}, fs, fmt.Errorf("config: reconcile-liveness-interval %q: %w", reconcileLivenessStr, err)
 		}
 		cfg.ReconcileLivenessInterval = parsedLiveness
+	}
+	if autoPromoteStr != "" {
+		parsedAutoPromote, err := time.ParseDuration(autoPromoteStr)
+		if err != nil {
+			return Config{}, fs, fmt.Errorf("config: auto-promote-from-shadow-interval %q: %w", autoPromoteStr, err)
+		}
+		cfg.AutoPromoteInterval = parsedAutoPromote
 	}
 
 	if thresholdStr != "" {
