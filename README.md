@@ -18,3 +18,7 @@ See [docs/architecture/decisions/](docs/architecture/decisions/) for design deci
 ## Status
 
 Pre-v0.0.1. Substrate work in progress. See [CHANGELOG](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE)
